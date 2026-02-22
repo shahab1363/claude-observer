@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Claude Transcripts - Claude Permission Analyzer</title>
+    <link rel="stylesheet" href="/css/styles.css">
+    <style>
+        .project-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 24px; }
+        .project-card {
+            background: var(--bg-secondary, #fff); border: 1px solid var(--border-color, #e0e0e0);
+            border-radius: 8px; padding: 12px 16px; cursor: pointer; transition: border-color 0.2s;
+        }
+        .project-card:hover { border-color: var(--accent-primary, #2563eb); }
+        .project-card.active { border-color: var(--accent-primary, #2563eb); background: var(--accent-primary-bg, #eff6ff); }
+        .project-name { font-weight: 600; font-size: 0.95em; color: var(--text-primary, #1a1a2e); }
+        .project-meta { font-size: 0.8em; color: var(--text-muted, #666); margin-top: 4px; }
+
+        .sessions-table { width: 100%; border-collapse: collapse; }
+        .sessions-table th, .sessions-table td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--border-color, #e0e0e0); color: var(--text-primary, #1a1a2e); }
+        .sessions-table th { font-size: 0.8em; text-transform: uppercase; color: var(--text-muted, #666); }
+        .sessions-table tr { cursor: pointer; transition: background 0.15s; }
+        .sessions-table tbody tr:hover { background: var(--bg-hover, #f5f5f5); }
+        .session-size { font-size: 0.85em; color: var(--text-muted, #666); }
+
+        .transcript-viewer {
+            display: flex; flex-direction: column; gap: 8px;
+            max-height: 70vh; overflow-y: auto; padding-right: 8px;
+            scroll-behavior: smooth;
+        }
+        .transcript-entry {
+            padding: 10px 14px; border-radius: 6px; font-size: 0.9em;
+            border-left: 3px solid var(--border-color, #ddd);
+            background: var(--bg-secondary, #fff); color: var(--text-primary, #1a1a2e);
+        }
+        .transcript-entry.type-user { border-left-color: var(--color-info, #2563eb); background: var(--color-info-bg, #eff6ff); }
+        .transcript-entry.type-assistant { border-left-color: var(--color-success, #16a34a); background: var(--color-success-bg, #f0fdf4); }
+        .transcript-entry.type-progress { border-left-color: var(--color-warning, #d97706); background: var(--color-warning-bg, #fffbeb); }
+        .transcript-entry.type-system { border-left-color: #7c3aed; background: var(--bg-tertiary, #f5f3ff); }
+        .transcript-entry.type-tool-result { border-left-color: #6b7280; background: var(--bg-tertiary, #f3f4f6); }
+        .transcript-entry .entry-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 4px; font-size: 0.8em; color: var(--text-muted, #666);
+        }
+        .transcript-entry .entry-type {
+            font-weight: 600; text-transform: uppercase; font-size: 0.75em;
+            padding: 2px 6px; border-radius: 3px; background: var(--bg-tertiary, #e5e7eb); color: var(--text-secondary, #444);
+        }
+        .transcript-entry .entry-content {
+            white-space: pre-wrap; word-break: break-word; font-family: inherit; line-height: 1.5;
+            color: var(--text-primary, #1a1a2e);
+        }
+        .transcript-entry .entry-content.md-rendered { white-space: normal; }
+        .transcript-entry .entry-content.md-rendered .md-code-block {
+            background: var(--bg-tertiary, #f3f4f6); padding: 10px 14px; border-radius: 6px;
+            overflow-x: auto; font-family: monospace; font-size: 0.9em; margin: 8px 0;
+            white-space: pre;
+        }
+        .transcript-entry .entry-content.md-rendered .md-inline-code {
+            background: var(--bg-tertiary, #f3f4f6); padding: 1px 4px; border-radius: 3px; font-family: monospace; font-size: 0.9em;
+        }
+        .transcript-entry .entry-content.md-rendered .md-h1 { font-size: 1.4em; font-weight: 700; margin: 12px 0 6px; }
+        .transcript-entry .entry-content.md-rendered .md-h2 { font-size: 1.2em; font-weight: 700; margin: 10px 0 5px; }
+        .transcript-entry .entry-content.md-rendered .md-h3 { font-size: 1.1em; font-weight: 600; margin: 8px 0 4px; }
+        .transcript-entry .entry-content.md-rendered .md-ul, .transcript-entry .entry-content.md-rendered .md-ol { margin: 4px 0 4px 20px; }
+        .transcript-entry .entry-content.md-rendered .md-p { margin: 4px 0; }
+        .transcript-entry .entry-content.md-rendered .md-hr { border: none; border-top: 1px solid var(--border-color, #ddd); margin: 8px 0; }
+        .transcript-entry .entry-content.md-rendered .md-link { color: var(--accent-primary, #2563eb); }
+        .transcript-entry .entry-content.truncated { max-height: 200px; overflow: hidden; position: relative; }
+        .transcript-entry .entry-content.truncated::after {
+            content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 40px;
+            background: linear-gradient(transparent, var(--bg-secondary, #fff));
+        }
+        .expand-btn { font-size: 0.8em; color: var(--accent-primary, #2563eb); cursor: pointer; border: none; background: none; padding: 4px 0; }
+
+        .two-panel { display: grid; grid-template-columns: 300px 1fr; gap: 20px; }
+        .sidebar-panel { max-height: 80vh; overflow-y: auto; }
+        @media (max-width: 900px) { .two-panel { grid-template-columns: 1fr; } }
+
+        .transcript-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+        .filter-chip {
+            font-size: 0.8em; padding: 4px 10px; border-radius: 12px; border: 1px solid var(--border-color, #ddd);
+            cursor: pointer; background: var(--bg-secondary, #fff); color: var(--text-primary, #1a1a2e); transition: all 0.15s;
+        }
+        .filter-chip.active { background: var(--accent-primary, #2563eb); color: #fff; border-color: var(--accent-primary, #2563eb); }
+        .entry-count { font-size: 0.85em; color: var(--text-muted, #666); margin-bottom: 8px; }
+
+        .tool-use-block { font-family: monospace; font-size: 0.85em; background: var(--bg-tertiary, #f3f4f6); padding: 8px 12px; border-radius: 4px; margin-top: 4px; white-space: pre-wrap; word-break: break-word; }
+        .tool-name-badge { font-weight: 700; display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.8em; background: var(--accent-primary, #2563eb); color: #fff; margin-right: 6px; }
+        .tool-result-block { font-family: monospace; font-size: 0.85em; background: var(--bg-tertiary, #f3f4f6); padding: 8px 12px; border-radius: 4px; margin-top: 4px; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto; }
+
+        .viewer-toolbar {
+            display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;
+            padding: 8px 12px; background: var(--bg-secondary, #fff); border-radius: 6px;
+            border: 1px solid var(--border-color, #e0e0e0);
+        }
+        .viewer-toolbar .btn { font-size: 0.8em; padding: 4px 10px; }
+        .toggle-btn { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8em; cursor: pointer; user-select: none; color: var(--text-primary, #1a1a2e); }
+        .toggle-btn input { margin: 0; }
+        .toolbar-sep { width: 1px; height: 20px; background: var(--border-color, #ddd); margin: 0 4px; }
+        .live-indicator { display: inline-flex; align-items: center; gap: 4px; font-size: 0.8em; color: var(--color-success, #16a34a); }
+        .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-success, #16a34a); animation: pulse-live 1.5s infinite; }
+        @keyframes pulse-live { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    </style>
+</head>
+<body>
+    <a href="#main" class="skip-link">Skip to main content</a>
+
+    <div class="container">
+        <header>
+            <h1>Claude Permission Analyzer</h1>
+            <div class="header-right">
+                <div class="status" role="status" aria-label="Service connection status">
+                    <span class="status-indicator" aria-hidden="true"></span>
+                    <span class="status-label">Checking...</span>
+                </div>
+                <button id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode (D)">&#9790;</button>
+            </div>
+        </header>
+
+        <nav aria-label="Main navigation" role="navigation">
+            <a href="/">Dashboard</a>
+            <a href="/logs.html">Live Logs</a>
+            <a href="/session.html">Sessions</a>
+            <a href="/transcripts.html" class="active" aria-current="page">Transcripts</a>
+            <a href="/prompts.html">Prompt Editor</a>
+            <a href="/config.html">Configuration</a>
+            <a href="/claude-settings.html">Claude Settings</a>
+        </nav>
+
+        <main id="main">
+            <!-- Project/Session Browser -->
+            <section id="browserView">
+                <div class="card-header">
+                    <h2>Claude Session Transcripts</h2>
+                    <button class="btn btn-sm" onclick="loadProjects()">Refresh</button>
+                </div>
+                <p style="margin-bottom:16px;color:var(--text-secondary,#666);font-size:0.9em;">
+                    Browse Claude Code session transcripts from <code>~/.claude/projects/</code>.
+                </p>
+                <div class="two-panel">
+                    <div class="sidebar-panel">
+                        <h3 style="margin-bottom:8px;">Projects</h3>
+                        <div id="projectList" class="project-list">
+                            <div class="empty-state"><p>Loading projects...</p></div>
+                        </div>
+                    </div>
+                    <div>
+                        <h3 style="margin-bottom:8px;">Sessions</h3>
+                        <div id="sessionTable">
+                            <div class="empty-state"><p>Select a project to view sessions</p></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Transcript Viewer -->
+            <section id="transcriptView" style="display:none;">
+                <div class="card-header">
+                    <h2>Transcript: <span id="transcriptSessionId" style="font-size:0.7em;font-weight:normal;">-</span></h2>
+                    <button class="btn btn-sm" onclick="backToBrowser()">Back to Browser</button>
+                </div>
+
+                <div class="viewer-toolbar">
+                    <label class="toggle-btn"><input type="checkbox" id="chkAutoScroll" checked> Auto-scroll</label>
+                    <span class="toolbar-sep"></span>
+                    <label class="toggle-btn"><input type="checkbox" id="chkMarkdown"> Render Markdown</label>
+                    <span class="toolbar-sep"></span>
+                    <label class="toggle-btn"><input type="checkbox" id="chkLive" checked> Live updates</label>
+                    <span class="live-indicator" id="liveIndicator" style="display:none;"><span class="live-dot"></span> Live</span>
+                    <span class="toolbar-sep"></span>
+                    <button class="btn btn-sm" onclick="exportTranscript('json')">Export JSON</button>
+                    <button class="btn btn-sm" onclick="exportTranscript('html')">Export HTML</button>
+                </div>
+
+                <div class="transcript-filters" id="transcriptFilters"></div>
+                <div class="entry-count" id="entryCount"></div>
+                <div class="transcript-viewer" id="transcriptContent">
+                    <div class="empty-state"><p>Loading transcript...</p></div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toastContainer" class="toast-container" role="status" aria-live="polite"></div>
+
+    <script src="/js/shared.js"></script>
+    <script>
+        let allProjects = [];
+        let knownTypes = new Set();
+        let activeFilters = new Set();
+        let currentEntries = [];
+        let currentSessionId = null;
+        let sseSource = null;
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+        }
+
+        function decodePath(encoded) {
+            return encoded.replace(/^([A-Z])--/, '$1:\\').replace(/-/g, '\\');
+        }
+
+        // --- Project Browser ---
+        async function loadProjects() {
+            var list = document.getElementById('projectList');
+            try {
+                var resp = await fetch('/api/claude-logs/projects');
+                if (!resp.ok) throw new Error('Failed to load projects');
+                allProjects = await resp.json();
+
+                if (allProjects.length === 0) {
+                    list.innerHTML = '<div class="empty-state"><p>No Claude projects found</p></div>';
+                    return;
+                }
+
+                allProjects.sort(function(a, b) {
+                    var aMax = Math.max.apply(null, (a.sessions || []).map(function(s) { return new Date(s.lastModified).getTime(); }).concat([0]));
+                    var bMax = Math.max.apply(null, (b.sessions || []).map(function(s) { return new Date(s.lastModified).getTime(); }).concat([0]));
+                    return bMax - aMax;
+                });
+
+                list.innerHTML = allProjects.map(function(p, i) {
+                    var sessionCount = (p.sessions || []).length;
+                    var totalSize = (p.sessions || []).reduce(function(sum, s) { return sum + (s.sizeBytes || 0); }, 0);
+                    var decoded = decodePath(p.name);
+                    return '<div class="project-card" onclick="selectProject(' + i + ')" data-idx="' + i + '">' +
+                        '<div class="project-name" title="' + escapeHtml(decoded) + '">' + escapeHtml(p.name) + '</div>' +
+                        '<div class="project-meta">' + sessionCount + ' session' + (sessionCount !== 1 ? 's' : '') + ' &middot; ' + formatBytes(totalSize) + '</div>' +
+                        '</div>';
+                }).join('');
+            } catch (err) {
+                list.innerHTML = '<div class="empty-state"><p>Error: ' + escapeHtml(err.message) + '</p></div>';
+            }
+        }
+
+        function selectProject(idx) {
+            document.querySelectorAll('.project-card').forEach(function(c) { c.classList.remove('active'); });
+            var card = document.querySelector('.project-card[data-idx="' + idx + '"]');
+            if (card) card.classList.add('active');
+
+            var project = allProjects[idx];
+            var sessions = (project.sessions || []).sort(function(a, b) { return new Date(b.lastModified) - new Date(a.lastModified); });
+            var table = document.getElementById('sessionTable');
+
+            if (sessions.length === 0) {
+                table.innerHTML = '<div class="empty-state"><p>No sessions in this project</p></div>';
+                return;
+            }
+
+            table.innerHTML =
+                '<table class="sessions-table"><thead><tr><th>Session ID</th><th>Last Modified</th><th>Size</th></tr></thead><tbody>' +
+                sessions.map(function(s) {
+                    return '<tr onclick="viewTranscript(\'' + escapeHtml(s.sessionId) + '\')">' +
+                        '<td style="font-family:monospace;font-size:0.85em;">' + escapeHtml(s.sessionId) + '</td>' +
+                        '<td>' + new Date(s.lastModified).toLocaleString() + '</td>' +
+                        '<td class="session-size">' + formatBytes(s.sizeBytes) + '</td>' +
+                        '</tr>';
+                }).join('') +
+                '</tbody></table>';
+        }
+
+        // --- Transcript Viewer ---
+        async function viewTranscript(sessionId) {
+            // Close any existing SSE connection
+            closeSse();
+
+            currentSessionId = sessionId;
+            document.getElementById('browserView').style.display = 'none';
+            document.getElementById('transcriptView').style.display = '';
+            document.getElementById('transcriptSessionId').textContent = sessionId;
+            document.getElementById('transcriptContent').innerHTML = '<div class="empty-state"><p>Loading transcript...</p></div>';
+
+            try {
+                var resp = await fetch('/api/claude-logs/transcript/' + encodeURIComponent(sessionId));
+                if (!resp.ok) throw new Error('Failed to load transcript');
+                currentEntries = await resp.json();
+
+                knownTypes = new Set();
+                currentEntries.forEach(function(e) { if (e.type) knownTypes.add(e.type); });
+                activeFilters = new Set(knownTypes);
+
+                toolUseIndex = buildToolUseIndex();
+                renderFilterChips();
+                renderTranscript();
+                autoScrollToBottom();
+
+                // Start live updates if enabled
+                if (document.getElementById('chkLive').checked) {
+                    startSse(sessionId);
+                }
+            } catch (err) {
+                document.getElementById('transcriptContent').innerHTML =
+                    '<div class="empty-state"><p>Error: ' + escapeHtml(err.message) + '</p></div>';
+            }
+        }
+
+        // --- SSE Live Streaming ---
+        function startSse(sessionId) {
+            closeSse();
+            sseSource = new EventSource('/api/claude-logs/transcript/' + encodeURIComponent(sessionId) + '/stream');
+            document.getElementById('liveIndicator').style.display = '';
+
+            sseSource.onmessage = function(event) {
+                try {
+                    var entry = JSON.parse(event.data);
+                    currentEntries.push(entry);
+
+                    // Index any tool_use blocks in this entry for result linking
+                    if (entry.message && Array.isArray(entry.message.content)) {
+                        entry.message.content.forEach(function(c) {
+                            if (c && c.type === 'tool_use' && c.id) toolUseIndex[c.id] = c;
+                        });
+                    }
+
+                    // Only auto-enable truly new types (never seen before)
+                    if (entry.type && !knownTypes.has(entry.type)) {
+                        knownTypes.add(entry.type);
+                        activeFilters.add(entry.type);
+                        renderFilterChips();
+                    }
+
+                    // If entry matches current filters, append it to DOM
+                    if (entry.type && activeFilters.has(entry.type)) {
+                        appendTranscriptEntry(entry, currentEntries.length - 1);
+                        updateEntryCount();
+                        autoScrollToBottom();
+                    }
+                } catch (e) {
+                    // Ignore parse errors (keepalive comments)
+                }
+            };
+
+            sseSource.onerror = function() {
+                document.getElementById('liveIndicator').style.display = 'none';
+            };
+        }
+
+        function closeSse() {
+            if (sseSource) {
+                sseSource.close();
+                sseSource = null;
+            }
+            var indicator = document.getElementById('liveIndicator');
+            if (indicator) indicator.style.display = 'none';
+        }
+
+        // --- Filter Chips ---
+        function renderFilterChips() {
+            var container = document.getElementById('transcriptFilters');
+            var sorted = Array.from(knownTypes).sort();
+            container.innerHTML = sorted.map(function(t) {
+                var isActive = activeFilters.has(t);
+                return '<span class="filter-chip ' + (isActive ? 'active' : '') + '" onclick="toggleFilter(\'' + escapeHtml(t) + '\')" data-type="' + escapeHtml(t) + '">' + escapeHtml(t) + '</span>';
+            }).join('') + '<span class="filter-chip" onclick="toggleAllFilters()" style="font-weight:600;">Toggle All</span>';
+        }
+
+        function toggleFilter(type) {
+            if (activeFilters.has(type)) activeFilters.delete(type);
+            else activeFilters.add(type);
+            document.querySelectorAll('.filter-chip[data-type]').forEach(function(c) {
+                c.classList.toggle('active', activeFilters.has(c.dataset.type));
+            });
+            renderTranscript();
+        }
+
+        function toggleAllFilters() {
+            if (activeFilters.size === knownTypes.size) {
+                activeFilters.clear();
+            } else {
+                activeFilters = new Set(knownTypes);
+            }
+            document.querySelectorAll('.filter-chip[data-type]').forEach(function(c) {
+                c.classList.toggle('active', activeFilters.has(c.dataset.type));
+            });
+            renderTranscript();
+        }
+
+        // --- Rendering ---
+        function renderTranscript() {
+            var container = document.getElementById('transcriptContent');
+            var filtered = currentEntries.filter(function(e) { return e.type && activeFilters.has(e.type); });
+            updateEntryCount();
+
+            if (filtered.length === 0) {
+                container.innerHTML = '<div class="empty-state"><p>No entries match the selected filters</p></div>';
+                return;
+            }
+
+            container.innerHTML = filtered.map(function(entry, i) {
+                return buildEntryHtml(entry, i);
+            }).join('');
+        }
+
+        function appendTranscriptEntry(entry, globalIdx) {
+            var container = document.getElementById('transcriptContent');
+            // Remove empty-state if present
+            var empty = container.querySelector('.empty-state');
+            if (empty) empty.remove();
+
+            var filtered = currentEntries.filter(function(e) { return e.type && activeFilters.has(e.type); });
+            var localIdx = filtered.length - 1;
+
+            var div = document.createElement('div');
+            div.innerHTML = buildEntryHtml(entry, localIdx);
+            var child = div.firstElementChild;
+            if (child) {
+                child.classList.add('new-entry');
+                container.appendChild(child);
+            }
+        }
+
+        function hasToolBlocks(entry) {
+            if (!entry.message || typeof entry.message !== 'object') return false;
+            var content = entry.message.content;
+            if (!Array.isArray(content)) return false;
+            for (var i = 0; i < content.length; i++) {
+                if (content[i] && (content[i].type === 'tool_use' || content[i].type === 'tool_result')) return true;
+            }
+            return false;
+        }
+
+        // Build index of tool_use_id -> tool_use content block for linking results to requests
+        function buildToolUseIndex() {
+            var index = {};
+            for (var i = 0; i < currentEntries.length; i++) {
+                var e = currentEntries[i];
+                if (!e.message || !Array.isArray(e.message.content)) continue;
+                for (var j = 0; j < e.message.content.length; j++) {
+                    var c = e.message.content[j];
+                    if (c && c.type === 'tool_use' && c.id) {
+                        index[c.id] = c;
+                    }
+                }
+            }
+            return index;
+        }
+
+        var toolUseIndex = {};
+
+        function findToolUseForResult(toolResult) {
+            if (!toolResult.tool_use_id) return null;
+            return toolUseIndex[toolResult.tool_use_id] || null;
+        }
+
+        function buildToolBlocksHtml(entry, idx) {
+            var content = entry.message.content;
+            var parts = [];
+            for (var i = 0; i < content.length; i++) {
+                var c = content[i];
+                if (typeof c === 'string') {
+                    if (c.trim()) parts.push('<div class="entry-content">' + escapeHtml(c) + '</div>');
+                } else if (c && c.type === 'tool_use') {
+                    var toolName = c.name || 'unknown';
+                    var badge = '<span class="tool-name-badge">' + escapeHtml(toolName) + '</span>';
+                    var details = formatToolUse(c);
+                    // Remove the first "Tool: name" line since we show it as a badge
+                    var detailLines = details.split('\n');
+                    if (detailLines.length > 0 && detailLines[0].indexOf('Tool: ') === 0) detailLines.shift();
+                    var detailText = detailLines.join('\n');
+                    parts.push(badge + '<div class="tool-use-block">' + escapeHtml(detailText) + '</div>');
+                } else if (c && c.type === 'tool_result') {
+                    // Look up the originating tool_use request
+                    var originatingToolUse = findToolUseForResult(c);
+                    var requestHeader = '';
+                    if (originatingToolUse) {
+                        var toolName = originatingToolUse.name || 'unknown';
+                        var requestDetails = formatToolUse(originatingToolUse);
+                        var requestLines = requestDetails.split('\n');
+                        if (requestLines.length > 0 && requestLines[0].indexOf('Tool: ') === 0) requestLines.shift();
+                        requestHeader = '<span class="tool-name-badge">' + escapeHtml(toolName) + '</span>' +
+                            '<div class="tool-use-block" style="margin-bottom:6px;opacity:0.8;border-left:2px solid var(--accent-primary,#2563eb);padding-left:10px;">' +
+                            escapeHtml(requestLines.join('\n')) + '</div>';
+                    }
+                    var resultText = formatToolResult(c);
+                    var truncResult = resultText.length > 1500;
+                    var displayResult = truncResult ? resultText.substring(0, 1500) + '\n... [truncated]' : resultText;
+                    parts.push(requestHeader + '<div class="tool-result-block">' + escapeHtml(displayResult) + '</div>');
+                } else if (c && c.text) {
+                    parts.push('<div class="entry-content">' + escapeHtml(c.text) + '</div>');
+                } else if (c && c.type === 'image') {
+                    parts.push('<div class="entry-content">[Image]</div>');
+                }
+            }
+            return parts.join('\n');
+        }
+
+        function buildEntryHtml(entry, idx) {
+            var type = entry.type || 'unknown';
+            var time = entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : '';
+            var role = entry.message && typeof entry.message === 'object' ? (entry.message.role || '') : '';
+            var useMarkdown = document.getElementById('chkMarkdown') && document.getElementById('chkMarkdown').checked;
+
+            // Detect tool_result messages masquerading as "user" type
+            // In Claude's API, tool results are sent as role:"user" but they're not user input
+            if (type === 'user' && entry.message && Array.isArray(entry.message.content)) {
+                var hasToolResult = entry.message.content.some(function(c) { return c && c.type === 'tool_result'; });
+                if (hasToolResult) {
+                    type = 'tool_result';
+                    role = 'tool output';
+                }
+            }
+            var typeClass = getTypeClass(type);
+
+            var contentHtml = '';
+
+            // If this entry contains tool_use or tool_result blocks, render them with special styling
+            if (hasToolBlocks(entry)) {
+                contentHtml = '<div class="entry-content" id="content-' + idx + '">' + buildToolBlocksHtml(entry, idx) + '</div>';
+            } else {
+                var content = extractContent(entry);
+                var truncated = content && content.length > 500;
+                var displayContent = truncated ? content.substring(0, 500) : content;
+
+                if (displayContent) {
+                    if (useMarkdown && typeof SimpleMarkdown !== 'undefined') {
+                        contentHtml = '<div class="entry-content md-rendered" id="content-' + idx + '">' + SimpleMarkdown.render(displayContent) + '</div>';
+                    } else {
+                        contentHtml = '<div class="entry-content ' + (truncated ? 'truncated' : '') + '" id="content-' + idx + '">' + escapeHtml(displayContent) + '</div>';
+                    }
+                    if (truncated) {
+                        contentHtml += '<button class="expand-btn" onclick="expandContent(' + idx + ', this)">Show more (' + content.length + ' chars)</button>';
+                    }
+                }
+            }
+
+            return '<div class="transcript-entry ' + typeClass + '">' +
+                '<div class="entry-header">' +
+                '<span><span class="entry-type">' + escapeHtml(type) + '</span>' + (role ? ' <strong>' + escapeHtml(role) + '</strong>' : '') + '</span>' +
+                '<span>' + time + '</span>' +
+                '</div>' +
+                contentHtml +
+                '</div>';
+        }
+
+        function updateEntryCount() {
+            var filtered = currentEntries.filter(function(e) { return e.type && activeFilters.has(e.type); });
+            document.getElementById('entryCount').textContent = 'Showing ' + filtered.length + ' of ' + currentEntries.length + ' entries';
+        }
+
+        function getTypeClass(type) {
+            if (type === 'user') return 'type-user';
+            if (type === 'assistant') return 'type-assistant';
+            if (type === 'tool_result') return 'type-tool-result';
+            if (type === 'progress' || type === 'hook_progress') return 'type-progress';
+            if (type === 'system' || type === 'file-history-snapshot') return 'type-system';
+            return '';
+        }
+
+        function formatToolUse(c) {
+            var lines = ['Tool: ' + (c.name || 'unknown')];
+            var input = c.input || {};
+            var name = (c.name || '').toLowerCase();
+
+            // Show the most relevant fields prominently based on tool type
+            if (name === 'bash' || name === 'execute') {
+                if (input.command) lines.push('command: ' + input.command);
+                if (input.description) lines.push('description: ' + input.description);
+                if (input.timeout) lines.push('timeout: ' + input.timeout + 'ms');
+            } else if (name === 'read') {
+                if (input.file_path) lines.push('file_path: ' + input.file_path);
+                if (input.offset) lines.push('offset: ' + input.offset);
+                if (input.limit) lines.push('limit: ' + input.limit);
+            } else if (name === 'edit') {
+                if (input.file_path) lines.push('file_path: ' + input.file_path);
+                if (input.old_string) {
+                    var old = input.old_string.length > 200 ? input.old_string.substring(0, 200) + '...' : input.old_string;
+                    lines.push('old_string: ' + old);
+                }
+                if (input.new_string) {
+                    var ns = input.new_string.length > 200 ? input.new_string.substring(0, 200) + '...' : input.new_string;
+                    lines.push('new_string: ' + ns);
+                }
+                if (input.replace_all) lines.push('replace_all: true');
+            } else if (name === 'write') {
+                if (input.file_path) lines.push('file_path: ' + input.file_path);
+                if (input.content) {
+                    var preview = input.content.length > 200 ? input.content.substring(0, 200) + '...' : input.content;
+                    lines.push('content: ' + preview);
+                }
+            } else if (name === 'grep') {
+                if (input.pattern) lines.push('pattern: ' + input.pattern);
+                if (input.path) lines.push('path: ' + input.path);
+                if (input.glob) lines.push('glob: ' + input.glob);
+                if (input.output_mode) lines.push('output_mode: ' + input.output_mode);
+            } else if (name === 'glob') {
+                if (input.pattern) lines.push('pattern: ' + input.pattern);
+                if (input.path) lines.push('path: ' + input.path);
+            } else if (name === 'websearch') {
+                if (input.query) lines.push('query: ' + input.query);
+            } else if (name === 'webfetch') {
+                if (input.url) lines.push('url: ' + input.url);
+                if (input.prompt) lines.push('prompt: ' + input.prompt);
+            } else {
+                // Generic: show all input keys
+                var keys = Object.keys(input);
+                for (var k = 0; k < keys.length; k++) {
+                    var val = input[keys[k]];
+                    var valStr = typeof val === 'string' ? val : JSON.stringify(val);
+                    if (valStr && valStr.length > 300) valStr = valStr.substring(0, 300) + '...';
+                    lines.push(keys[k] + ': ' + valStr);
+                }
+            }
+            return lines.join('\n');
+        }
+
+        function formatToolResult(c) {
+            var text = '';
+            if (typeof c.content === 'string') {
+                text = c.content;
+            } else if (Array.isArray(c.content)) {
+                var parts = [];
+                for (var i = 0; i < c.content.length; i++) {
+                    var part = c.content[i];
+                    if (typeof part === 'string') parts.push(part);
+                    else if (part && part.text) parts.push(part.text);
+                    else if (part && part.type === 'image') parts.push('[Image]');
+                    else parts.push(JSON.stringify(part));
+                }
+                text = parts.join('\n');
+            } else if (c.output) {
+                text = typeof c.output === 'string' ? c.output : JSON.stringify(c.output);
+            }
+
+            if (c.is_error) text = '[ERROR] ' + text;
+            if (!text && c.tool_use_id) text = '(empty result for tool_use_id: ' + c.tool_use_id + ')';
+            if (!text) text = '(empty tool result)';
+
+            // Truncate very long results
+            if (text.length > 3000) {
+                text = text.substring(0, 3000) + '\n... [truncated, ' + text.length + ' chars total]';
+            }
+            return text;
+        }
+
+        function extractContent(entry) {
+            // Handle progress and hook_progress entries
+            if (entry.type === 'progress' || entry.type === 'hook_progress') {
+                if (entry.data && typeof entry.data === 'object') {
+                    var parts = [];
+                    if (entry.data.hookName) parts.push('Hook: ' + entry.data.hookName);
+                    if (entry.data.toolName) parts.push('Tool: ' + entry.data.toolName);
+                    if (entry.data.tool_name) parts.push('Tool: ' + entry.data.tool_name);
+                    if (entry.data.command) parts.push('Command: ' + entry.data.command);
+                    if (entry.data.status) parts.push('Status: ' + entry.data.status);
+                    if (entry.data.message) parts.push(entry.data.message);
+                    if (entry.data.content) parts.push(typeof entry.data.content === 'string' ? entry.data.content : JSON.stringify(entry.data.content));
+                    if (parts.length > 0) return parts.join('\n');
+                    return JSON.stringify(entry.data);
+                }
+            }
+
+            // Handle file-history-snapshot entries
+            if (entry.type === 'file-history-snapshot') {
+                if (entry.data && typeof entry.data === 'object') {
+                    var files = entry.data.files || entry.data.paths || entry.data;
+                    if (Array.isArray(files)) {
+                        return 'Files snapshotted (' + files.length + '):\n' + files.map(function(f) {
+                            return typeof f === 'string' ? '  ' + f : '  ' + (f.path || f.file_path || JSON.stringify(f));
+                        }).join('\n');
+                    }
+                    if (entry.message && typeof entry.message === 'object' && entry.message.content) {
+                        // fall through to message handling
+                    } else {
+                        return JSON.stringify(entry.data, null, 2);
+                    }
+                }
+            }
+
+            if (entry.message && typeof entry.message === 'object') {
+                var msg = entry.message;
+                if (msg.content) {
+                    if (typeof msg.content === 'string') return msg.content;
+                    if (Array.isArray(msg.content)) {
+                        return msg.content.map(function(c) {
+                            if (typeof c === 'string') return c;
+                            if (c && c.type === 'tool_use') return formatToolUse(c);
+                            if (c && c.type === 'tool_result') return formatToolResult(c);
+                            if (c && c.text) return c.text;
+                            if (c && c.type === 'image') return '[Image]';
+                            return JSON.stringify(c);
+                        }).join('\n\n');
+                    }
+                }
+            }
+            if (entry.data && typeof entry.data === 'object') {
+                if (entry.data.type) return '[' + entry.data.type + '] ' + (entry.data.command || entry.data.hookName || '');
+                return JSON.stringify(entry.data);
+            }
+            return null;
+        }
+
+        function expandContent(idx, btn) {
+            var el = document.getElementById('content-' + idx);
+            if (!el) return;
+            var filtered = currentEntries.filter(function(e) { return e.type && activeFilters.has(e.type); });
+            var entry = filtered[idx];
+            if (!entry) return;
+            var full = extractContent(entry);
+            var useMarkdown = document.getElementById('chkMarkdown') && document.getElementById('chkMarkdown').checked;
+            if (useMarkdown && typeof SimpleMarkdown !== 'undefined') {
+                el.innerHTML = SimpleMarkdown.render(full);
+                el.classList.add('md-rendered');
+            } else {
+                el.textContent = full;
+            }
+            el.classList.remove('truncated');
+            btn.remove();
+        }
+
+        // --- Auto-scroll ---
+        function autoScrollToBottom() {
+            if (!document.getElementById('chkAutoScroll').checked) return;
+            var container = document.getElementById('transcriptContent');
+            if (container) {
+                container.scrollTop = container.scrollHeight;
+            }
+        }
+
+        // --- Export ---
+        function exportTranscript(format) {
+            if (!currentEntries || currentEntries.length === 0) {
+                Toast.show('Export', 'No transcript data to export', 'warning');
+                return;
+            }
+
+            var sessionId = currentSessionId || 'transcript';
+
+            if (format === 'json') {
+                var json = JSON.stringify(currentEntries, null, 2);
+                downloadFile(json, sessionId + '.json', 'application/json');
+            } else if (format === 'html') {
+                var html = generateHtmlExport(currentEntries, sessionId);
+                downloadFile(html, sessionId + '.html', 'text/html');
+            }
+        }
+
+        function generateHtmlExport(entries, sessionId) {
+            var rows = entries.map(function(e) {
+                var type = e.type || 'unknown';
+                var time = e.timestamp ? new Date(e.timestamp).toLocaleString() : '';
+                var role = e.message && typeof e.message === 'object' ? (e.message.role || '') : '';
+                var content = extractContent(e) || '';
+                var color = type === 'user' ? '#2563eb' : type === 'assistant' ? '#16a34a' : type === 'progress' ? '#d97706' : '#7c3aed';
+                return '<div style="padding:8px 12px;margin:6px 0;border-left:3px solid ' + color + ';background:#fafafa;border-radius:4px;">' +
+                    '<div style="font-size:0.8em;color:#666;margin-bottom:4px;"><strong>' + escapeHtml(type) + '</strong>' +
+                    (role ? ' - ' + escapeHtml(role) : '') + ' <span style="float:right;">' + escapeHtml(time) + '</span></div>' +
+                    '<div style="white-space:pre-wrap;word-break:break-word;">' + escapeHtml(content) + '</div></div>';
+            }).join('\n');
+
+            return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Transcript: ' + escapeHtml(sessionId) + '</title>' +
+                '<style>body{font-family:-apple-system,system-ui,sans-serif;max-width:900px;margin:0 auto;padding:20px;color:#1a1a2e;}</style></head><body>' +
+                '<h1>Claude Session Transcript</h1><p>Session: <code>' + escapeHtml(sessionId) + '</code></p>' +
+                '<p>Exported: ' + new Date().toLocaleString() + ' | Entries: ' + entries.length + '</p><hr>' +
+                rows + '</body></html>';
+        }
+
+        function downloadFile(content, filename, mimeType) {
+            var blob = new Blob([content], { type: mimeType });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // --- Navigation ---
+        function backToBrowser() {
+            closeSse();
+            currentSessionId = null;
+            document.getElementById('transcriptView').style.display = 'none';
+            document.getElementById('browserView').style.display = '';
+        }
+
+        // --- Deep link: find project for a session ID and open it ---
+        async function openSessionFromUrl(sessionId) {
+            // Wait for projects to load first
+            await loadProjects();
+
+            // Search all projects for this session
+            for (var i = 0; i < allProjects.length; i++) {
+                var sessions = allProjects[i].sessions || [];
+                for (var j = 0; j < sessions.length; j++) {
+                    if (sessions[j].sessionId === sessionId) {
+                        // Found it - select the project and open transcript
+                        selectProject(i);
+                        viewTranscript(sessionId);
+                        return;
+                    }
+                }
+            }
+
+            // Session not found in any project - try opening directly anyway
+            viewTranscript(sessionId);
+        }
+
+        // --- Event handlers ---
+        document.addEventListener('DOMContentLoaded', function() {
+            loadProjects();
+
+            // If ?session= param provided (e.g. from sessions page link), find the project and open transcript
+            var urlSession = new URLSearchParams(window.location.search).get('session');
+            if (urlSession) {
+                openSessionFromUrl(urlSession);
+            }
+
+            document.getElementById('chkMarkdown').addEventListener('change', function() {
+                renderTranscript();
+                autoScrollToBottom();
+            });
+
+            document.getElementById('chkLive').addEventListener('change', function() {
+                if (this.checked && currentSessionId) {
+                    startSse(currentSessionId);
+                } else {
+                    closeSse();
+                }
+            });
+        });
+    </script>
+</body>
+</html>

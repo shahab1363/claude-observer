@@ -1,0 +1,39 @@
+# Worktrees directory
+.worktrees/
+
+# Claude local settings
+.claude/
+
+# Serena IDE config
+.serena/
+
+# Build outputs
+bin/
+obj/
+out/
+build/
+dist/
+
+# Dependencies
+node_modules/
+packages/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc
+
+# Runtime data
+*.log

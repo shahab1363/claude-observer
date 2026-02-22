@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Logs - Claude Permission Analyzer</title>
+    <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+    <a href="#main" class="skip-link">Skip to main content</a>
+
+    <div class="container">
+        <header>
+            <h1>Claude Permission Analyzer</h1>
+            <div class="header-right">
+                <div class="status" role="status" aria-label="Service connection status">
+                    <span class="status-indicator" aria-hidden="true"></span>
+                    <span class="status-label">Checking...</span>
+                </div>
+                <button id="themeToggle" class="theme-toggle" aria-label="Toggle dark mode" title="Toggle dark mode (D)">&#9790;</button>
+            </div>
+        </header>
+
+        <nav aria-label="Main navigation" role="navigation">
+            <a href="/">Dashboard</a>
+            <a href="/logs.html" class="active" aria-current="page">Live Logs</a>
+            <a href="/session.html">Sessions</a>
+            <a href="/transcripts.html">Transcripts</a>
+            <a href="/prompts.html">Prompt Editor</a>
+            <a href="/config.html">Configuration</a>
+            <a href="/claude-settings.html">Claude Settings</a>
+        </nav>
+
+        <main id="main">
+            <div class="breadcrumbs" aria-label="Breadcrumb">
+                <a href="/">Home</a>
+                <span class="separator" aria-hidden="true">/</span>
+                <span class="current">Logs</span>
+            </div>
+
+            <div class="card">
+                <div class="logs-toolbar">
+                    <div class="filter-group" role="group" aria-label="Log filters">
+                        <label for="filterDecision" class="sr-only">Filter by decision</label>
+                        <select id="filterDecision" class="filter-select" aria-label="Filter by decision">
+                            <option value="">All Decisions</option>
+                            <option value="auto-approved">Approved</option>
+                            <option value="denied">Denied</option>
+                            <option value="no-handler">No Handler</option>
+                        </select>
+
+                        <label for="filterCategory" class="sr-only">Filter by category</label>
+                        <select id="filterCategory" class="filter-select" aria-label="Filter by category">
+                            <option value="">All Categories</option>
+                            <option value="safe">Safe</option>
+                            <option value="cautious">Cautious</option>
+                            <option value="risky">Risky</option>
+                            <option value="dangerous">Dangerous</option>
+                        </select>
+
+                        <label for="filterHookType" class="sr-only">Filter by hook type</label>
+                        <select id="filterHookType" class="filter-select" aria-label="Filter by hook type">
+                            <option value="">All Hook Types</option>
+                            <option value="PermissionRequest">PermissionRequest</option>
+                            <option value="PreToolUse">PreToolUse</option>
+                            <option value="PostToolUse">PostToolUse</option>
+                            <option value="PostToolUseFailure">PostToolUseFailure</option>
+                            <option value="UserPromptSubmit">UserPromptSubmit</option>
+                            <option value="Stop">Stop</option>
+                        </select>
+
+                        <label for="filterTool" class="sr-only">Filter by tool</label>
+                        <select id="filterTool" class="filter-select" aria-label="Filter by tool">
+                            <option value="">All Tools</option>
+                            <option value="Bash">Bash</option>
+                            <option value="Read">Read</option>
+                            <option value="Write">Write</option>
+                            <option value="Edit">Edit</option>
+                            <option value="Glob">Glob</option>
+                            <option value="Grep">Grep</option>
+                            <option value="WebFetch">WebFetch</option>
+                            <option value="WebSearch">WebSearch</option>
+                            <option value="Task">Task</option>
+                        </select>
+
+                        <label for="filterSession" class="sr-only">Filter by session</label>
+                        <select id="filterSession" class="filter-select" aria-label="Filter by session">
+                            <option value="">All Sessions</option>
+                        </select>
+
+                        <label for="filterLimit" class="sr-only">Number of entries</label>
+                        <select id="filterLimit" class="filter-select" aria-label="Number of entries to show">
+                            <option value="50">50 entries</option>
+                            <option value="100" selected>100 entries</option>
+                            <option value="200">200 entries</option>
+                            <option value="500">500 entries</option>
+                        </select>
+
+                        <span id="logCount" style="font-size: 12px; color: var(--text-faint);">Loading...</span>
+                    </div>
+
+                    <div class="btn-group" style="display:flex;align-items:center;gap:8px;">
+                        <label style="display:inline-flex;align-items:center;gap:4px;font-size:0.8em;cursor:pointer;user-select:none;"><input type="checkbox" id="chkAutoScrollLogs" checked> Auto-scroll</label>
+                        <label style="display:inline-flex;align-items:center;gap:4px;font-size:0.8em;cursor:pointer;user-select:none;"><input type="checkbox" id="chkAutoRefreshLogs" checked> Live (5s)</label>
+                        <button class="btn btn-sm" onclick="exportLogs('csv')" aria-label="Export logs as CSV">Export CSV</button>
+                        <button class="btn btn-sm" onclick="exportLogs('json')" aria-label="Export logs as JSON">Export JSON</button>
+                        <button class="btn btn-sm" onclick="clearLogs()" aria-label="Clear all logs" style="color:var(--color-danger,#dc2626);">Clear Logs</button>
+                        <button class="btn btn-sm" onclick="refreshData()" aria-label="Refresh logs">Refresh</button>
+                    </div>
+                </div>
+
+                <div class="log-columns-header" role="row" aria-hidden="true">
+                    <span>Time</span>
+                    <span>Type</span>
+                    <span>Tool</span>
+                    <span>Details</span>
+                    <span>Decision</span>
+                    <span>Score</span>
+                    <span>Session</span>
+                    <span></span>
+                </div>
+
+                <div id="logEntries" role="table" aria-label="Permission log entries">
+                    <div class="empty-state">
+                        <p>Loading logs...</p>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toastContainer" class="toast-container" role="status" aria-live="polite"></div>
+
+    <!-- Keyboard Shortcuts Modal -->
+    <div id="shortcutsModal" class="modal-overlay" role="dialog" aria-label="Keyboard shortcuts" aria-modal="true">
+        <div class="modal">
+            <h2>Keyboard Shortcuts</h2>
+            <ul class="shortcut-list">
+                <li class="shortcut-item">
+                    <span>Toggle dark mode</span>
+                    <span class="shortcut-key"><kbd>D</kbd></span>
+                </li>
+                <li class="shortcut-item">
+                    <span>Refresh data</span>
+                    <span class="shortcut-key"><kbd>R</kbd></span>
+                </li>
+                <li class="shortcut-item">
+                    <span>Go to Dashboard</span>
+                    <span class="shortcut-key"><kbd>1</kbd></span>
+                </li>
+                <li class="shortcut-item">
+                    <span>Go to Logs</span>
+                    <span class="shortcut-key"><kbd>2</kbd></span>
+                </li>
+                <li class="shortcut-item">
+                    <span>Go to Configuration</span>
+                    <span class="shortcut-key"><kbd>3</kbd></span>
+                </li>
+                <li class="shortcut-item">
+                    <span>Show shortcuts</span>
+                    <span class="shortcut-key"><kbd>?</kbd></span>
+                </li>
+                <li class="shortcut-item">
+                    <span>Close modal</span>
+                    <span class="shortcut-key"><kbd>Esc</kbd></span>
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <script src="/js/shared.js"></script>
+    <script src="/js/logs.js"></script>
+</body>
+</html>

@@ -1,0 +1,359 @@
+using ClaudePermissionAnalyzer.Api.Services;
+using ClaudePermissionAnalyzer.Api.Models;
+using ClaudePermissionAnalyzer.Api.Middleware;
+using Microsoft.AspNetCore.ResponseCompression;
+using System.Diagnostics;
+
+// ---- Parse CLI arguments ----
+var installHooks = args.Contains("--install-hooks");
+var noHooks = args.Contains("--no-hooks");
+var enforceMode = args.Contains("--enforce");
+
+// Filter our custom args out before passing to WebApplication
+var webArgs = args.Where(a => a != "--install-hooks" && a != "--no-hooks" && a != "--enforce").ToArray();
+
+var builder = WebApplication.CreateBuilder(webArgs);
+
+// Add services
+builder.Services.AddControllers(options =>
+{
+    // Limit request body size to 1MB to prevent DoS attacks
+    options.MaxModelBindingCollectionSize = 1000;
+});
+
+// Add memory cache for session management with size limit
+builder.Services.AddMemoryCache(options =>
+{
+    options.SizeLimit = 1000;
+});
+
+// Enable response compression
+builder.Services.AddResponseCompression(options =>
+{
+    options.EnableForHttps = true;
+    options.Providers.Add<GzipCompressionProvider>();
+    options.MimeTypes = ResponseCompressionDefaults.MimeTypes.Concat(
+        new[] { "application/json", "text/event-stream" });
+});
+
+builder.Services.Configure<GzipCompressionProviderOptions>(options =>
+{
+    options.Level = System.IO.Compression.CompressionLevel.Fastest;
+});
+
+// Configure Kestrel server limits
+builder.WebHost.ConfigureKestrel(options =>
+{
+    options.Limits.MaxRequestBodySize = 1 * 1024 * 1024; // 1MB (reduced from 10MB)
+    options.Limits.MaxRequestLineSize = 8192;
+    options.Limits.MaxRequestHeadersTotalSize = 32768;
+    options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(30);
+    options.Limits.KeepAliveTimeout = TimeSpan.FromMinutes(2);
+});
+
+// Configure application services
+var configPath = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+    ".claude-permission-analyzer",
+    "config.json");
+
+// Load configuration without logger (logger will be injected by DI after build)
+Configuration config;
+try
+{
+    var configManager = new ClaudePermissionAnalyzer.Api.Services.ConfigurationManager(configPath);
+    config = await configManager.LoadAsync();
+}
+catch (Exception ex)
+{
+    Console.Error.WriteLine($"FATAL: Failed to initialize application: {ex.Message}");
+    Console.Error.WriteLine("Check configuration file permissions and format.");
+    Console.Error.WriteLine($"Config path: {configPath}");
+    Environment.Exit(1);
+    return; // Unreachable, but satisfies compiler
+}
+
+// Apply --enforce flag to config
+if (enforceMode)
+{
+    config.EnforcementEnabled = true;
+}
+
+// Validate server host - must be localhost/loopback only
+var allowedHosts = new[] { "localhost", "127.0.0.1", "::1" };
+if (!allowedHosts.Contains(config.Server.Host, StringComparer.OrdinalIgnoreCase))
+{
+    Console.Error.WriteLine($"FATAL: Server host '{config.Server.Host}' is not allowed. Only localhost/loopback addresses are permitted.");
+    Console.Error.WriteLine("This service is designed to run locally only.");
+    Environment.Exit(1);
+    return;
+}
+
+// Determine prompts directory
+var promptsDir = Path.Combine(
+    Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+    ".claude-permission-analyzer",
+    "prompts");
+
+// Register services with DI container
+builder.Services.AddSingleton(sp =>
+{
+    // Create ConfigurationManager with proper logger from DI
+    var logger = sp.GetRequiredService<ILogger<ClaudePermissionAnalyzer.Api.Services.ConfigurationManager>>();
+    return new ClaudePermissionAnalyzer.Api.Services.ConfigurationManager(configPath, logger);
+});
+
+builder.Services.AddSingleton(sp =>
+    new SessionManager(
+        config.Session.StorageDir,
+        config.Session.MaxHistoryPerSession,
+        sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+        sp.GetRequiredService<ILogger<SessionManager>>()));
+
+builder.Services.AddSingleton<ILLMClient>(sp =>
+{
+    if (config.Llm.PersistentProcess)
+    {
+        var logger = sp.GetRequiredService<ILogger<PersistentClaudeClient>>();
+        logger.LogInformation("Using persistent claude process mode");
+        return new PersistentClaudeClient(config.Llm, logger);
+    }
+    else
+    {
+        var logger = sp.GetRequiredService<ILogger<ClaudeCliClient>>();
+        logger.LogInformation("Using one-shot claude process mode");
+        var cm = sp.GetRequiredService<ClaudePermissionAnalyzer.Api.Services.ConfigurationManager>();
+        return new ClaudeCliClient(config.Llm, logger, cm);
+    }
+});
+
+builder.Services.AddSingleton(sp =>
+    new PromptTemplateService(promptsDir, sp.GetRequiredService<ILogger<PromptTemplateService>>()));
+
+builder.Services.AddSingleton(sp =>
+    new TranscriptWatcher(sp.GetRequiredService<ILogger<TranscriptWatcher>>()));
+
+builder.Services.AddSingleton<HookHandlerFactory>(sp =>
+    new HookHandlerFactory(
+        sp,
+        sp.GetRequiredService<ILLMClient>(),
+        sp.GetRequiredService<PromptTemplateService>(),
+        sp.GetRequiredService<SessionManager>(),
+        sp.GetRequiredService<ILogger<HookHandlerFactory>>()));
+
+builder.Services.AddSingleton<ProfileService>(sp =>
+    new ProfileService(
+        sp.GetRequiredService<ClaudePermissionAnalyzer.Api.Services.ConfigurationManager>(),
+        sp.GetRequiredService<ILogger<ProfileService>>()));
+
+builder.Services.AddSingleton<AdaptiveThresholdService>(sp =>
+    new AdaptiveThresholdService(
+        config.Session.StorageDir.Replace("~/", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile) + "/"),
+        sp.GetRequiredService<ILogger<AdaptiveThresholdService>>()));
+
+builder.Services.AddSingleton<InsightsEngine>(sp =>
+    new InsightsEngine(
+        sp.GetRequiredService<AdaptiveThresholdService>(),
+        sp.GetRequiredService<SessionManager>(),
+        sp.GetRequiredService<ILogger<InsightsEngine>>()));
+
+builder.Services.AddSingleton<AuditReportGenerator>(sp =>
+    new AuditReportGenerator(
+        sp.GetRequiredService<SessionManager>(),
+        sp.GetRequiredService<AdaptiveThresholdService>(),
+        sp.GetRequiredService<ProfileService>()));
+
+builder.Services.AddSingleton<EnforcementService>(sp =>
+    new EnforcementService(
+        sp.GetRequiredService<ClaudePermissionAnalyzer.Api.Services.ConfigurationManager>(),
+        sp.GetRequiredService<ILogger<EnforcementService>>()));
+
+builder.Services.AddSingleton<HookInstaller>(sp =>
+    new HookInstaller(
+        sp.GetRequiredService<ILogger<HookInstaller>>(),
+        sp.GetRequiredService<ClaudePermissionAnalyzer.Api.Services.ConfigurationManager>(),
+        $"http://{config.Server.Host}:{config.Server.Port}"));
+
+// Add OpenAPI/Swagger documentation
+builder.Services.AddOpenApi();
+
+// Add CORS - restrict to localhost only for security
+builder.Services.AddCors(options =>
+{
+    options.AddDefaultPolicy(policy =>
+    {
+        policy.WithOrigins(
+                $"http://localhost:{config.Server.Port}",
+                $"http://127.0.0.1:{config.Server.Port}",
+                $"https://localhost:{config.Server.Port}",
+                $"https://127.0.0.1:{config.Server.Port}")
+              .WithMethods("GET", "POST", "PUT", "DELETE") // Only allow needed methods
+              .WithHeaders("Content-Type", "X-Api-Key"); // Only allow needed headers
+    });
+});
+
+var app = builder.Build();
+
+// Set static logger for HandlerConfig
+var handlerConfigLogger = app.Services.GetRequiredService<ILogger<HandlerConfig>>();
+HandlerConfig.SetLogger(handlerConfigLogger);
+
+// Start TranscriptWatcher
+var transcriptWatcher = app.Services.GetRequiredService<TranscriptWatcher>();
+transcriptWatcher.Start();
+
+// Initialize ProfileService
+var profileService = app.Services.GetRequiredService<ProfileService>();
+await profileService.InitializeAsync();
+
+// Initialize AdaptiveThresholdService
+var adaptiveService = app.Services.GetRequiredService<AdaptiveThresholdService>();
+await adaptiveService.LoadAsync();
+
+// ---- Hook installation logic ----
+var hookInstaller = app.Services.GetRequiredService<HookInstaller>();
+bool hooksInstalledThisSession = false;
+
+if (installHooks)
+{
+    hookInstaller.Install();
+    hooksInstalledThisSession = true;
+    Console.WriteLine("Claude hooks installed.");
+}
+else if (!noHooks)
+{
+    // Interactive prompt - only if running with a console
+    if (Environment.UserInteractive && !Console.IsInputRedirected)
+    {
+        Console.Write("Install Claude hooks? [y/N]: ");
+        var response = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (response == "y" || response == "yes")
+        {
+            hookInstaller.Install();
+            hooksInstalledThisSession = true;
+            Console.WriteLine("Claude hooks installed.");
+        }
+        else
+        {
+            Console.WriteLine("Skipping hook installation. Use --install-hooks to install later.");
+        }
+    }
+}
+
+// Apply enforcement mode from CLI
+if (enforceMode)
+{
+    var enforcementService = app.Services.GetRequiredService<EnforcementService>();
+    await enforcementService.SetEnforcedAsync(true);
+    Console.WriteLine("Enforcement mode enabled - hooks will return approve/deny decisions.");
+}
+
+// Ensure services are disposed on shutdown
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+var sessionManager = app.Services.GetRequiredService<SessionManager>();
+
+// Auto-cleanup hooks on shutdown if we installed them this session
+lifetime.ApplicationStopping.Register(() =>
+{
+    if (hooksInstalledThisSession)
+    {
+        try
+        {
+            hookInstaller.Uninstall();
+            Console.WriteLine("Claude hooks removed on shutdown.");
+        }
+        catch (Exception ex)
+        {
+            var logger = app.Services.GetRequiredService<ILogger<Program>>();
+            logger.LogError(ex, "Failed to uninstall hooks during shutdown");
+        }
+    }
+
+    try
+    {
+        transcriptWatcher.Dispose();
+    }
+    catch (Exception ex)
+    {
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "Failed to dispose TranscriptWatcher during shutdown");
+    }
+
+    try
+    {
+        sessionManager.Dispose();
+    }
+    catch (Exception ex)
+    {
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "Failed to dispose SessionManager during shutdown");
+    }
+
+    try
+    {
+        var llmClient = app.Services.GetRequiredService<ILLMClient>();
+        if (llmClient is IDisposable disposableLlm)
+            disposableLlm.Dispose();
+    }
+    catch (Exception ex)
+    {
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "Failed to dispose LLM client during shutdown");
+    }
+});
+
+// Auto-launch browser after the server starts
+var appUrl = $"http://{config.Server.Host}:{config.Server.Port}";
+lifetime.ApplicationStarted.Register(() =>
+{
+    try
+    {
+        Process.Start(new ProcessStartInfo(appUrl) { UseShellExecute = true });
+    }
+    catch
+    {
+        // Non-fatal - user can navigate manually
+        Console.WriteLine($"Dashboard available at: {appUrl}");
+    }
+});
+
+// Configure middleware pipeline (ORDER MATTERS)
+
+// 1. Security headers on ALL responses
+app.UseMiddleware<SecurityHeadersMiddleware>();
+
+// 2. Rate limiting before any processing
+app.UseMiddleware<RateLimitingMiddleware>();
+
+// 3. API key authentication
+app.UseMiddleware<ApiKeyAuthMiddleware>();
+
+// 4. Response compression for performance
+app.UseResponseCompression();
+
+// 5. Global exception handler - prevent error info leakage in production
+if (!app.Environment.IsDevelopment())
+{
+    app.UseExceptionHandler(errorApp =>
+    {
+        errorApp.Run(async context =>
+        {
+            context.Response.StatusCode = 500;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsJsonAsync(new { error = "An unexpected error occurred" });
+        });
+    });
+}
+
+// 6. OpenAPI/Swagger documentation endpoint
+app.MapOpenApi();
+app.UseDefaultFiles();
+app.UseStaticFiles();
+app.UseCors();
+app.UseAuthorization();
+app.MapControllers();
+
+var modeLabel = config.EnforcementEnabled ? "ENFORCE" : "OBSERVE";
+Console.WriteLine($"Claude Permission Analyzer starting in {modeLabel} mode at {appUrl}");
+
+app.Run(appUrl);
