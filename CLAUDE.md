@@ -2,18 +2,214 @@
 
 ## CRITICAL: Read Before Doing Anything
 
-**Always read `HANDOFF.md` first** before starting any work. It contains the complete project state, architecture, known issues, security decisions, and next steps. This file is gitignored (local to each developer).
+**Always read `HANDOFF.md` first** if it exists — it contains the latest local project state, in-progress work, and session-specific context. This file is gitignored (local to each developer).
 
 ## Project Overview
 
-This is the **Claude Permission Analyzer** - a C# ASP.NET Core (.NET 10) service that auto-approves Claude Code permission requests using LLM-based safety analysis. It has a web dashboard, Python hook scripts, and session tracking.
+This is the **Claude Permission Analyzer** - a C# ASP.NET Core (.NET 10) service that auto-approves Claude Code permission requests using LLM-based safety analysis. It has a web dashboard, curl-based hooks, and session tracking.
+
+**Core flow:** Claude Code → `curl` hook command → `POST /api/hooks/claude` → C# ASP.NET Core service → LLM CLI analysis → approve/deny/passthrough → Claude-formatted JSON response
+
+**Default mode:** Observe-only. Hooks log events but return no decision (Claude asks user as normal). Enforcement mode can be toggled from the dashboard or via `--enforce` CLI flag.
 
 ## Quick Commands
 
 ```bash
-dotnet build                                           # Build
-dotnet test                                            # Run 107 tests
-dotnet run --project src/ClaudePermissionAnalyzer.Api  # Run (http://localhost:5050)
+dotnet build                                                           # Build
+dotnet test                                                            # Run tests
+dotnet run --project src/ClaudePermissionAnalyzer.Api                  # Run (interactive prompt)
+dotnet run --project src/ClaudePermissionAnalyzer.Api -- --install-hooks          # Auto-install hooks
+dotnet run --project src/ClaudePermissionAnalyzer.Api -- --install-hooks --enforce # Install + enforce
+dotnet run --project src/ClaudePermissionAnalyzer.Api -- --no-hooks               # Skip hooks
+```
+
+**On startup:** loads config → prompts to install hooks → starts at `http://localhost:5050` → opens browser → on Ctrl+C removes hooks
+
+## Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| Backend | C# .NET 10, ASP.NET Core Controllers |
+| Hook Commands | `curl` (zero dependencies — no Python, no pip) |
+| Frontend | Vanilla HTML/CSS/JS (zero external dependencies) |
+| LLM Integration | Claude CLI subprocess (`claude` command) |
+| Storage | JSON files on disk + in-memory MemoryCache |
+| Tests | xUnit + Moq |
+
+## Project Structure
+
+```
+ClaudeObserver/
+├── src/ClaudePermissionAnalyzer.Api/
+│   ├── Program.cs                          # Entry point: CLI args, DI, middleware, browser launch, hook install
+│   ├── Controllers/                        # 17 API controllers
+│   │   ├── ClaudeHookController.cs         # POST /api/hooks/claude?event={type} - main curl hook endpoint
+│   │   ├── HooksController.cs              # GET/POST /api/hooks/* - install/uninstall/enforce/status
+│   │   ├── ClaudeSettingsController.cs     # GET/PUT /api/claude-settings - view/edit ~/.claude/settings.json
+│   │   ├── AnalyzeController.cs            # POST /api/analyze - legacy hook analysis (Python hooks)
+│   │   ├── DashboardController.cs          # GET /api/dashboard/* - stats, sessions, activity
+│   │   ├── ConfigController.cs             # GET/PUT /api/config - config CRUD
+│   │   ├── HealthController.cs             # GET /health, /api/health
+│   │   ├── LogsController.cs              # GET/DELETE /api/logs - logs with filters, clear, export
+│   │   ├── SessionsController.cs           # GET /api/sessions/{id} - session details
+│   │   ├── PromptsController.cs            # GET/PUT /api/prompts/* - prompt templates
+│   │   ├── ClaudeLogsController.cs         # GET /api/claude-logs/* - transcript browsing + SSE stream
+│   │   ├── ProfileController.cs            # GET/POST /api/profile/* - permission profiles
+│   │   ├── AdaptiveThresholdController.cs  # GET/POST /api/adaptivethreshold/*
+│   │   ├── InsightsController.cs           # GET /api/insights
+│   │   ├── QuickActionsController.cs       # POST /api/quickactions/*
+│   │   └── AuditReportController.cs        # GET /api/auditreport/*
+│   ├── Handlers/                           # 5 hook handler implementations
+│   ├── Middleware/                          # 3 security middleware
+│   ├── Models/                             # 8 domain models
+│   ├── Security/                           # Input sanitization
+│   ├── Services/                           # 13 business logic services
+│   │   ├── SessionManager.cs               # Session CRUD + ClearAllSessionsAsync
+│   │   ├── ConfigurationManager.cs         # Config load/save
+│   │   ├── ClaudeCliClient.cs              # ILLMClient - one-shot claude subprocess
+│   │   ├── PersistentClaudeClient.cs       # ILLMClient - persistent claude process
+│   │   ├── HookHandlerFactory.cs           # Creates handler by mode string
+│   │   ├── PromptTemplateService.cs        # Template CRUD with hot-reload
+│   │   ├── TranscriptWatcher.cs            # Monitors ~/.claude/projects/ + SSE events
+│   │   ├── ProfileService.cs               # Permission profile switching
+│   │   ├── AdaptiveThresholdService.cs     # Learns from user overrides
+│   │   ├── InsightsEngine.cs               # Smart suggestions
+│   │   ├── AuditReportGenerator.cs         # HTML/JSON audit reports
+│   │   ├── EnforcementService.cs           # Observe/enforce toggle, persisted to config
+│   │   ├── HookInstaller.cs               # Install/uninstall curl hooks in ~/.claude/settings.json
+│   │   └── ILLMClient.cs                   # Interface for LLM integration
+│   ├── Exceptions/
+│   └── wwwroot/                            # Web UI (8 pages)
+│       ├── index.html                      # Dashboard: stats, charts, profiles, insights, hooks management
+│       ├── logs.html                       # Live logs: 6 filters (decision/category/hook type/tool/session/limit), export, clear
+│       ├── config.html                     # Service config + hook handler management UI
+│       ├── session.html                    # Session list + detail timeline with dynamic filter chips
+│       ├── transcripts.html                # Transcript browser: SSE, markdown, tool details, export
+│       ├── prompts.html                    # Prompt template editor
+│       ├── claude-settings.html            # VS Code-style JSON editor for ~/.claude/settings.json
+│       ├── css/styles.css                  # Full styling with dark mode, responsive
+│       └── js/
+│           ├── dashboard.js                # Dashboard logic, charts, profiles, quick actions, hooks controls
+│           ├── shared.js                   # Dark mode, toasts, shortcuts, connection status, SimpleMarkdown
+│           ├── config.js                   # Config page + hook handler management (inline editing)
+│           └── logs.js                     # Logs: incremental updates, filters, auto-scroll, auto-refresh
+├── prompts/                                # LLM prompt templates (9 files)
+├── hooks/                                  # Legacy Python hook scripts (optional, replaced by curl)
+├── tests/ClaudePermissionAnalyzer.Tests/   # xUnit tests
+├── docs/plans/                             # Design documents
+├── HANDOFF.md                              # Local project state (gitignored)
+└── ClaudePermissionAnalyzer.sln
+```
+
+## Hook Architecture
+
+### How Hooks Work (curl-based, zero dependencies)
+
+HookInstaller writes to `~/.claude/settings.json`:
+```json
+{
+  "hooks": {
+    "PermissionRequest": [{
+      "matcher": "Bash",
+      "hooks": [{ "type": "command", "command": "curl -sS -X POST \"http://localhost:5050/api/hooks/claude?event=PermissionRequest\" -H \"Content-Type: application/json\" -d @- # claude-analyzer" }]
+    }]
+  }
+}
+```
+
+**Flow:** Claude Code → stdin JSON → `curl` → service analyzes → Claude-formatted JSON → stdout → Claude reads decision.
+
+The `# claude-analyzer` comment is a marker for clean uninstall (only removes our hooks, not user's).
+
+### Config → Hooks Auto-Sync
+
+When hook handler config is saved via the Configuration page, hooks in `~/.claude/settings.json` are automatically reinstalled to stay in sync. The app config (`hookHandlers`) is the source of truth for processing logic; Claude's `settings.json` just contains the curl transport commands.
+
+### Enforcement Modes
+
+| Mode | Behavior |
+|------|----------|
+| **Observe** (default) | Logs events, returns `{}` — Claude asks user as normal |
+| **Enforce** | Returns approve/deny based on LLM safety scoring |
+
+## Web UI Pages
+
+| Page | URL | Features |
+|------|-----|----------|
+| **Dashboard** | `/` | Stats, charts, profiles, insights, hooks install/enforce toggles |
+| **Live Logs** | `/logs.html` | 6 filters (decision, category, hook type, tool, session, limit), incremental updates, auto-scroll, export CSV/JSON, clear logs |
+| **Sessions** | `/session.html` | Session list, detail timeline with dynamic filter chips, 5s live refresh, auto-scroll, link to transcript |
+| **Transcripts** | `/transcripts.html` | Project/session browser, SSE live stream, markdown toggle, tool_use/tool_result rendering, export JSON/HTML, deep-link via `?session=` |
+| **Prompt Editor** | `/prompts.html` | List/edit/create LLM prompt templates |
+| **Configuration** | `/config.html` | Service config editor + hook handler management (inline editing with prompt template dropdown, mode selector, threshold, auto-approve) |
+| **Claude Settings** | `/claude-settings.html` | VS Code-style JSON editor for `~/.claude/settings.json` with inline syntax highlighting, line numbers, error highlighting, Tab key support |
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/hooks/claude?event={type}` | **Main hook endpoint** — returns Claude-formatted JSON |
+| GET | `/api/hooks/status` | Hook installation & enforcement status |
+| POST | `/api/hooks/enforce` | Toggle enforcement on/off |
+| POST | `/api/hooks/install` | Install hooks to settings.json |
+| POST | `/api/hooks/uninstall` | Remove hooks from settings.json |
+| GET | `/api/claude-settings` | Read ~/.claude/settings.json |
+| PUT | `/api/claude-settings` | Write ~/.claude/settings.json (with JSON validation) |
+| GET | `/api/logs?decision=&category=&hookType=&toolName=&sessionId=&limit=` | Filtered logs |
+| DELETE | `/api/logs` | Clear all session log files |
+| POST | `/api/analyze` | Legacy analysis endpoint (Python hooks) |
+| GET | `/api/dashboard/stats` | Dashboard statistics |
+| GET | `/api/dashboard/sessions` | Active sessions list |
+| GET | `/api/dashboard/activity?limit=N` | Recent activity feed |
+| GET/PUT | `/api/config` | Configuration CRUD |
+| GET | `/health` | Health check |
+| GET | `/api/sessions/{id}` | Session event history |
+| GET/PUT | `/api/prompts/{name}` | Prompt template CRUD |
+| GET | `/api/logs/export/{format}` | Export logs (csv/json) |
+| GET | `/api/claude-logs/projects` | List Claude projects |
+| GET | `/api/claude-logs/transcript/{id}` | Get transcript entries |
+| GET | `/api/claude-logs/transcript/{id}/stream` | SSE live transcript stream |
+| GET | `/api/profile` | List profiles |
+| POST | `/api/profile/switch` | Switch permission profile |
+| GET | `/api/adaptivethreshold/stats` | Adaptive threshold stats |
+| POST | `/api/adaptivethreshold/override` | Record user override |
+| GET | `/api/insights` | Smart suggestions |
+| POST | `/api/quickactions/{action}` | Execute quick action |
+| GET | `/api/auditreport/{sessionId}` | JSON audit report |
+| GET | `/api/auditreport/{sessionId}/html` | HTML audit report |
+
+## Security Architecture
+
+### Middleware Pipeline (order matters)
+1. **SecurityHeadersMiddleware** — CSP, X-Frame-Options, no-cache on all responses
+2. **RateLimitingMiddleware** — 600 req/min per IP
+3. **ApiKeyAuthMiddleware** — X-Api-Key header validation
+4. **ResponseCompression** — Gzip
+5. **ExceptionHandler** — Generic errors in production
+
+### Key Measures
+- Input sanitization, path traversal protection, command injection prevention
+- LLM prompt injection defense, CORS localhost-only, Kestrel body limits
+- Hook error safety: any error returns `{}` (no opinion)
+
+## Configuration Reference
+
+Config: `~/.claude-permission-analyzer/config.json` (auto-created)
+
+```json
+{
+  "llm": { "provider": "claude-cli", "model": "sonnet", "timeout": 30000, "persistentProcess": true },
+  "server": { "port": 5050, "host": "localhost" },
+  "security": { "apiKey": null, "rateLimitPerMinute": 600 },
+  "profiles": { "activeProfile": "moderate" },
+  "session": { "maxHistoryPerSession": 50, "storageDir": "~/.claude-permission-analyzer/sessions" },
+  "enforcementEnabled": false,
+  "hookHandlers": {
+    "PermissionRequest": { "enabled": true, "handlers": [
+      { "name": "bash-analyzer", "matcher": "Bash", "mode": "llm-analysis", "promptTemplate": "bash-prompt.txt", "threshold": 95, "autoApprove": true }
+    ]}
+  }
+}
 ```
 
 ## Key Conventions
@@ -23,20 +219,10 @@ dotnet run --project src/ClaudePermissionAnalyzer.Api  # Run (http://localhost:5
 - **Frontend:** Vanilla HTML/CSS/JS only - NO external CDN dependencies
 - **Storage:** JSON files in `~/.claude-permission-analyzer/`
 - **Testing:** xUnit + Moq, tests mirror src structure
-- **Python hooks:** Minimal dependencies (only `requests` package)
 - **Security:** All new endpoints must go through the middleware pipeline (SecurityHeaders -> RateLimiting -> ApiKeyAuth)
 - **Error handling:** Use `StorageException` and `ConfigurationException` custom types, not bare `Exception`
 - **Thread safety:** SessionManager uses per-session SemaphoreSlim locks - maintain this pattern
 - **Config:** Auto-created at `~/.claude-permission-analyzer/config.json` on first run
-
-## File Layout
-
-- `src/ClaudePermissionAnalyzer.Api/` - Main application
-- `tests/ClaudePermissionAnalyzer.Tests/` - Test project
-- `hooks/` - Python hook scripts for Claude Code integration
-- `docs/plans/` - Design documents
-- `prompts/` - LLM prompt templates
-- `HANDOFF.md` - **Local project state and handoff details** (gitignored)
 
 ## Important Architectural Notes
 
@@ -45,6 +231,24 @@ dotnet run --project src/ClaudePermissionAnalyzer.Api  # Run (http://localhost:5
 3. **HandlerConfig.SetLogger** uses a static logger pattern because HandlerConfig instances are deserialized from JSON (not created by DI).
 4. **Python hooks exit with code 1 on errors** - this is critical for security. Exit code 0 means "no opinion" to Claude Code.
 5. **All file paths must be validated** - use InputSanitizer for session IDs, check for path traversal.
+
+## Known Issues and Technical Debt
+
+### High Priority
+1. **No tests for new services** — ClaudeHookController, HookInstaller, EnforcementService, ClaudeSettingsController
+2. **CSP uses unsafe-inline** — inline scripts in session.html, prompts.html, transcripts.html, claude-settings.html
+3. **Duplicate ConfigController endpoints** — overlapping `UpdateAsync` vs `UpdateConfigurationAsync`
+
+### Medium Priority
+4. **Cross-platform paths** — `~/` expansion may not work perfectly on all OSes
+5. **CSS file is ~2100 lines** — could split into component files
+6. **ConfigurationManager registered twice** in Program.cs (bootstrap + DI)
+7. **UnitTest1.cs** is an empty placeholder test
+
+### Low Priority
+8. **No API versioning**
+9. **Python hooks still in repo** — legacy, could be removed
+10. **install.ps1** is minimal
 
 ## Do NOT
 
