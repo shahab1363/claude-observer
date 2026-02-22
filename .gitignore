@@ -37,3 +37,6 @@ __pycache__/
 
 # Runtime data
 *.log
+
+# User handoff (local project state)
+HANDOFF.md

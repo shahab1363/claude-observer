@@ -1,5 +1,9 @@
 # Claude Permission Analyzer - Project Instructions
 
+## CRITICAL: Read Before Doing Anything
+
+**Always read `HANDOFF.md` first** before starting any work. It contains the complete project state, architecture, known issues, security decisions, and next steps. This file is gitignored (local to each developer).
+
 ## Project Overview
 
 This is the **Claude Permission Analyzer** - a C# ASP.NET Core (.NET 10) service that auto-approves Claude Code permission requests using LLM-based safety analysis. It has a web dashboard, Python hook scripts, and session tracking.
@@ -32,6 +36,7 @@ dotnet run --project src/ClaudePermissionAnalyzer.Api  # Run (http://localhost:5
 - `hooks/` - Python hook scripts for Claude Code integration
 - `docs/plans/` - Design documents
 - `prompts/` - LLM prompt templates
+- `HANDOFF.md` - **Local project state and handoff details** (gitignored)
 
 ## Important Architectural Notes
 
