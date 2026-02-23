@@ -66,4 +66,7 @@ public class SessionEvent
 
     [JsonPropertyName("threshold")]
     public int? Threshold { get; set; }
+
+    [JsonPropertyName("provider")]
+    public string? Provider { get; set; }
 }

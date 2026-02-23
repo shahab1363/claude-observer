@@ -49,10 +49,15 @@ public class ClaudeHookControllerTests : IDisposable
         var promptsDir = Path.Combine(_tempDir, "prompts");
         var promptTemplateService = new PromptTemplateService(promptsDir, NullLogger<PromptTemplateService>.Instance);
 
+        var llmClientProvider = new LLMClientProvider(
+            _configManager,
+            NullLoggerFactory.Instance,
+            NullLogger<LLMClientProvider>.Instance);
+
         _mockHandlerFactory = new Mock<HookHandlerFactory>(
             MockBehavior.Loose,
             Mock.Of<IServiceProvider>(),
-            Mock.Of<ILLMClient>(),
+            llmClientProvider,
             promptTemplateService,
             _sessionManager,
             NullLogger<HookHandlerFactory>.Instance);

@@ -385,6 +385,7 @@ async function loadHooksStatus() {
     try {
         var data = await fetchApi('/api/hooks/status');
         updateHooksUI(data.installed, data.enforced);
+        updateCopilotHooksUI(data.copilot);
     } catch {
         // Service may not support hooks endpoint yet
     }
@@ -411,6 +412,27 @@ function updateHooksUI(installed, enforced) {
     if (btnToggleEnforce) {
         btnToggleEnforce.textContent = enforced ? 'Switch to Observe' : 'Enable Enforcement';
         btnToggleEnforce.disabled = false;
+    }
+}
+
+function updateCopilotHooksUI(copilotStatus) {
+    var badge = document.getElementById('copilotInstalledBadge');
+    var btn = document.getElementById('btnToggleCopilotHooks');
+
+    if (!copilotStatus) {
+        if (badge) { badge.textContent = 'Unknown'; badge.className = 'hook-status-badge badge-neutral'; }
+        if (btn) { btn.textContent = 'Install Hooks'; btn.disabled = false; }
+        return;
+    }
+
+    var installed = copilotStatus.userInstalled;
+    if (badge) {
+        badge.textContent = installed ? 'Installed' : 'Not Installed';
+        badge.className = 'hook-status-badge ' + (installed ? 'badge-copilot' : 'badge-neutral');
+    }
+    if (btn) {
+        btn.textContent = installed ? 'Uninstall Hooks' : 'Install Hooks';
+        btn.disabled = false;
     }
 }
 
@@ -446,6 +468,46 @@ function initHooksControls() {
                 .catch(function (err) {
                     Toast.show('Enforcement Error', 'Failed: ' + err.message, 'danger');
                     btnToggleEnforce.disabled = false;
+                });
+        });
+    }
+
+    // Copilot hooks controls
+    var copilotLevelRadios = document.querySelectorAll('input[name="copilotLevel"]');
+    var repoPathGroup = document.getElementById('copilotRepoPathGroup');
+    copilotLevelRadios.forEach(function (radio) {
+        radio.addEventListener('change', function () {
+            if (repoPathGroup) {
+                repoPathGroup.style.display = this.value === 'repo' ? 'block' : 'none';
+            }
+        });
+    });
+
+    var btnToggleCopilot = document.getElementById('btnToggleCopilotHooks');
+    if (btnToggleCopilot) {
+        btnToggleCopilot.addEventListener('click', function () {
+            var badge = document.getElementById('copilotInstalledBadge');
+            var isInstalled = badge && badge.textContent === 'Installed';
+            var level = document.querySelector('input[name="copilotLevel"]:checked');
+            var levelValue = level ? level.value : 'user';
+            var repoPath = document.getElementById('copilotRepoPath');
+            var repoPathValue = repoPath ? repoPath.value.trim() : '';
+
+            var endpoint = isInstalled ? '/api/hooks/copilot/uninstall' : '/api/hooks/copilot/install';
+            var params = '?level=' + encodeURIComponent(levelValue);
+            if (levelValue === 'repo' && repoPathValue) {
+                params += '&repoPath=' + encodeURIComponent(repoPathValue);
+            }
+
+            btnToggleCopilot.disabled = true;
+            fetchApi(endpoint + params, { method: 'POST' })
+                .then(function (data) {
+                    Toast.show('Copilot Hooks', data.message, 'success');
+                    loadHooksStatus();
+                })
+                .catch(function (err) {
+                    Toast.show('Copilot Hooks Error', 'Failed: ' + err.message, 'danger');
+                    btnToggleCopilot.disabled = false;
                 });
         });
     }

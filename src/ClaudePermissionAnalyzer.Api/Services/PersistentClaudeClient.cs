@@ -267,7 +267,7 @@ public class PersistentClaudeClient : ILLMClient, IDisposable
             if (!Directory.Exists(isolatedDir)) Directory.CreateDirectory(isolatedDir);
             var settingsPath = Path.Combine(isolatedDir, "settings.json");
             if (!File.Exists(settingsPath))
-                File.WriteAllText(settingsPath, "{\"disableAllHooks\":true,\"enableAllProjectMcpServers\":false}");
+                File.WriteAllText(settingsPath, "{}");
             startInfo.Environment["CLAUDE_CONFIG_DIR"] = isolatedDir;
 
             _persistentProcess = new Process { StartInfo = startInfo };

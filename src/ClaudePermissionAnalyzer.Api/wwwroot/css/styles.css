@@ -2148,3 +2148,78 @@ kbd {
     font-size: 0.88em;
     color: var(--accent-primary, #2563eb);
 }
+
+/* ==========================================================================
+   Provider Badges
+   ========================================================================== */
+.provider-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75em;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.provider-badge.provider-claude {
+    background: rgba(130, 80, 223, 0.12);
+    color: #8250df;
+}
+
+.provider-badge.provider-copilot {
+    background: rgba(0, 150, 136, 0.12);
+    color: #009688;
+}
+
+[data-theme="dark"] .provider-badge.provider-claude {
+    background: rgba(130, 80, 223, 0.2);
+    color: #b48cff;
+}
+
+[data-theme="dark"] .provider-badge.provider-copilot {
+    background: rgba(0, 150, 136, 0.2);
+    color: #4dd0c8;
+}
+
+.badge-copilot {
+    background: rgba(0, 150, 136, 0.12) !important;
+    color: #009688 !important;
+}
+
+[data-theme="dark"] .badge-copilot {
+    background: rgba(0, 150, 136, 0.2) !important;
+    color: #4dd0c8 !important;
+}
+
+/* Copilot hook card styling */
+.copilot-card {
+    border-left: 3px solid #009688;
+}
+
+.copilot-level-selector {
+    display: flex;
+    gap: 16px;
+    margin-bottom: 8px;
+    font-size: 0.9em;
+}
+
+.copilot-level-selector label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+}
+
+.copilot-level-selector input[type="radio"] {
+    accent-color: #009688;
+}
+
+.input-field {
+    padding: 6px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 0.9em;
+}

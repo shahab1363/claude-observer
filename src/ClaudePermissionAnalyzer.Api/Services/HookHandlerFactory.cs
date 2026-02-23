@@ -7,20 +7,20 @@ namespace ClaudePermissionAnalyzer.Api.Services;
 public class HookHandlerFactory
 {
     private readonly IServiceProvider _serviceProvider;
-    private readonly ILLMClient _llmClient;
+    private readonly LLMClientProvider _llmClientProvider;
     private readonly PromptTemplateService _promptTemplateService;
     private readonly SessionManager _sessionManager;
     private readonly ILogger<HookHandlerFactory> _logger;
 
     public HookHandlerFactory(
         IServiceProvider serviceProvider,
-        ILLMClient llmClient,
+        LLMClientProvider llmClientProvider,
         PromptTemplateService promptTemplateService,
         SessionManager sessionManager,
         ILogger<HookHandlerFactory> logger)
     {
         _serviceProvider = serviceProvider;
-        _llmClient = llmClient;
+        _llmClientProvider = llmClientProvider;
         _promptTemplateService = promptTemplateService;
         _sessionManager = sessionManager;
         _logger = logger;
@@ -34,10 +34,12 @@ public class HookHandlerFactory
             promptTemplate = _promptTemplateService.GetTemplate(promptTemplateName);
         }
 
+        var llmClient = _llmClientProvider.GetClient();
+
         return mode switch
         {
-            "llm-analysis" => new LLMAnalysisHandler(_llmClient, promptTemplate),
-            "llm-validation" => new LLMAnalysisHandler(_llmClient, promptTemplate),
+            "llm-analysis" => new LLMAnalysisHandler(llmClient, promptTemplate),
+            "llm-validation" => new LLMAnalysisHandler(llmClient, promptTemplate),
             "log-only" => new LogOnlyHandler(
                 _serviceProvider.GetRequiredService<ILogger<LogOnlyHandler>>()),
             "context-injection" => new ContextInjectionHandler(

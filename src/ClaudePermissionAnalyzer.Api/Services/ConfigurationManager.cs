@@ -141,10 +141,34 @@ public class ConfigurationManager
         return new List<HandlerConfig>();
     }
 
-    public HandlerConfig? FindMatchingHandler(string hookEventName, string? toolName)
+    public HandlerConfig? FindMatchingHandler(string hookEventName, string? toolName, string provider = "claude")
     {
+        // For copilot provider, check copilot-specific handlers first
+        if (string.Equals(provider, "copilot", StringComparison.OrdinalIgnoreCase))
+        {
+            var copilotHandlers = GetHandlersForHook(hookEventName, provider: "copilot");
+            var match = copilotHandlers.FirstOrDefault(h => h.Matches(toolName ?? string.Empty));
+            if (match != null)
+                return match;
+        }
+
+        // Fall back to shared handlers
         var handlers = GetHandlersForHook(hookEventName);
         return handlers.FirstOrDefault(h => h.Matches(toolName ?? string.Empty));
+    }
+
+    public List<HandlerConfig> GetHandlersForHook(string hookEventName, string provider)
+    {
+        if (string.Equals(provider, "copilot", StringComparison.OrdinalIgnoreCase))
+        {
+            if (_configuration.Copilot.Enabled &&
+                _configuration.Copilot.HookHandlers.TryGetValue(hookEventName, out var copilotConfig))
+            {
+                return copilotConfig.Enabled ? copilotConfig.Handlers : new List<HandlerConfig>();
+            }
+        }
+
+        return GetHandlersForHook(hookEventName);
     }
 
     private static string GetDefaultConfigPath()
@@ -169,7 +193,7 @@ public class ConfigurationManager
             Llm = new LlmConfig
             {
                 Provider = "claude-cli",
-                Model = "sonnet",
+                Model = "opus",
                 Timeout = 30000,
                 PersistentProcess = true,
                 SystemPrompt = "You are a security analyzer that evaluates the safety of operations. Always respond ONLY with valid JSON containing safetyScore (0-100), reasoning (string), and category (safe|cautious|risky|dangerous). Never include any text outside the JSON object."
@@ -279,6 +303,32 @@ public class ConfigurationManager
                     Handlers = new List<HandlerConfig>
                     {
                         new() { Name = "stop-logger", Mode = "log-only" }
+                    }
+                }
+            },
+            Copilot = new CopilotConfig
+            {
+                Enabled = false,
+                HookHandlers = new Dictionary<string, HookEventConfig>
+                {
+                    ["PreToolUse"] = new HookEventConfig
+                    {
+                        Enabled = true,
+                        Handlers = new List<HandlerConfig>
+                        {
+                            new() { Name = "copilot-bash-analyzer", Matcher = "bash", Mode = "llm-analysis",
+                                PromptTemplate = Path.Combine(promptsDir, "bash-prompt.txt"),
+                                Threshold = 95, AutoApprove = true },
+                            new() { Name = "copilot-pre-tool-logger", Matcher = "*", Mode = "log-only" }
+                        }
+                    },
+                    ["PostToolUse"] = new HookEventConfig
+                    {
+                        Enabled = true,
+                        Handlers = new List<HandlerConfig>
+                        {
+                            new() { Name = "copilot-post-tool-logger", Matcher = "*", Mode = "log-only" }
+                        }
                     }
                 }
             }

@@ -110,9 +110,11 @@ function renderConfig(config) {
                     Provider
                     <small>LLM backend used for analysis</small>
                 </label>
-                <input id="cfg-provider" class="config-input" type="text"
-                    value="${escapeAttr(config.llm?.provider || 'claude-cli')}"
+                <select id="cfg-provider" class="config-input"
                     data-path="llm.provider" aria-label="LLM provider">
+                    <option value="claude-cli" ${(config.llm?.provider || 'claude-cli') === 'claude-cli' ? 'selected' : ''}>Claude Code CLI</option>
+                    <option value="copilot-cli" ${config.llm?.provider === 'copilot-cli' ? 'selected' : ''}>GitHub Copilot CLI</option>
+                </select>
             </div>
             <div class="config-field">
                 <label class="config-label" for="cfg-model">
@@ -163,9 +165,10 @@ function renderConfig(config) {
         </div>
     `;
 
-    // Add change listeners
+    // Add change listeners (use both 'input' and 'change' for <select> compatibility)
     container.querySelectorAll('.config-input').forEach(input => {
-        input.addEventListener('input', () => {
+        const eventType = input.tagName === 'SELECT' ? 'change' : 'input';
+        input.addEventListener(eventType, () => {
             isDirty = true;
             updateSaveButton();
         });

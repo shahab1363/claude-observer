@@ -17,12 +17,20 @@ public class Configuration
     /// When false, observe mode skips LLM calls entirely (just logs events).
     /// </summary>
     public bool AnalyzeInObserveMode { get; set; } = true;
+
+    public CopilotConfig Copilot { get; set; } = new();
+}
+
+public class CopilotConfig
+{
+    public bool Enabled { get; set; } = false;
+    public Dictionary<string, HookEventConfig> HookHandlers { get; set; } = new();
 }
 
 public class LlmConfig
 {
     public string Provider { get; set; } = "claude-cli";
-    public string Model { get; set; } = "sonnet";
+    public string Model { get; set; } = "opus";
     public int Timeout { get; set; } = 15000;
 
     /// <summary>

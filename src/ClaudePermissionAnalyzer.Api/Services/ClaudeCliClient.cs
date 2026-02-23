@@ -229,6 +229,11 @@ public class ClaudeCliClient : ILLMClient
             "--output-format",
             "text",
             "--no-session-persistence",  // Don't save to session history
+            "--tools",
+            "",  // Disable ALL tools for fast startup
+            "--strict-mcp-config",
+            "--mcp-config",
+            "{}",  // Disable all MCP servers
         };
 
         if (!string.IsNullOrWhiteSpace(_config.SystemPrompt))
@@ -256,13 +261,8 @@ public class ClaudeCliClient : ILLMClient
         if (!File.Exists(settingsPath))
         {
             if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-            // Minimal settings: disable all hooks and MCP servers
-            File.WriteAllText(settingsPath, """
-                {
-                  "disableAllHooks": true,
-                  "enableAllProjectMcpServers": false
-                }
-                """);
+            // Empty settings — isolation is handled by CLI flags (--tools, --strict-mcp-config, --mcp-config)
+            File.WriteAllText(settingsPath, "{}");
         }
 
         return dir;

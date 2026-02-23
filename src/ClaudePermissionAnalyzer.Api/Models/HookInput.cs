@@ -22,4 +22,7 @@ public class HookInput
 
     [JsonPropertyName("timestamp")]
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+
+    [JsonPropertyName("provider")]
+    public string Provider { get; set; } = "claude";
 }

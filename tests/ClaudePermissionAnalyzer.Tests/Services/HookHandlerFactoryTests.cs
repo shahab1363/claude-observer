@@ -26,13 +26,19 @@ public class HookHandlerFactoryTests : IDisposable
         services.AddMemoryCache();
         _serviceProvider = services.BuildServiceProvider();
 
-        var mockLlm = new Mock<ILLMClient>();
         _sessionManager = new SessionManager(_testStorageDir, 50, new MemoryCache(new MemoryCacheOptions()));
         var promptService = new PromptTemplateService(promptsDir, _serviceProvider.GetRequiredService<ILogger<PromptTemplateService>>());
 
+        var configManager = new ConfigurationManager(new Configuration());
+        var loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
+        var llmClientProvider = new LLMClientProvider(
+            configManager,
+            loggerFactory,
+            _serviceProvider.GetRequiredService<ILogger<LLMClientProvider>>());
+
         _factory = new HookHandlerFactory(
             _serviceProvider,
-            mockLlm.Object,
+            llmClientProvider,
             promptService,
             _sessionManager,
             _serviceProvider.GetRequiredService<ILogger<HookHandlerFactory>>());

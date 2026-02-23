@@ -6,11 +6,17 @@ using System.Diagnostics;
 
 // ---- Parse CLI arguments ----
 var installHooks = args.Contains("--install-hooks");
+var installCopilotHooks = args.Contains("--install-copilot-hooks");
 var noHooks = args.Contains("--no-hooks");
 var enforceMode = args.Contains("--enforce");
+var copilotRepoArg = args.FirstOrDefault(a => a.StartsWith("--copilot-repo="));
+var copilotRepoPath = copilotRepoArg?.Split('=', 2).ElementAtOrDefault(1);
 
 // Filter our custom args out before passing to WebApplication
-var webArgs = args.Where(a => a != "--install-hooks" && a != "--no-hooks" && a != "--enforce").ToArray();
+var webArgs = args.Where(a =>
+    a != "--install-hooks" && a != "--install-copilot-hooks" &&
+    a != "--no-hooks" && a != "--enforce" &&
+    !a.StartsWith("--copilot-repo=")).ToArray();
 
 var builder = WebApplication.CreateBuilder(webArgs);
 
@@ -110,22 +116,14 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
         sp.GetRequiredService<ILogger<SessionManager>>()));
 
-builder.Services.AddSingleton<ILLMClient>(sp =>
-{
-    if (config.Llm.PersistentProcess)
-    {
-        var logger = sp.GetRequiredService<ILogger<PersistentClaudeClient>>();
-        logger.LogInformation("Using persistent claude process mode");
-        return new PersistentClaudeClient(config.Llm, logger);
-    }
-    else
-    {
-        var logger = sp.GetRequiredService<ILogger<ClaudeCliClient>>();
-        logger.LogInformation("Using one-shot claude process mode");
-        var cm = sp.GetRequiredService<ClaudePermissionAnalyzer.Api.Services.ConfigurationManager>();
-        return new ClaudeCliClient(config.Llm, logger, cm);
-    }
-});
+builder.Services.AddSingleton<LLMClientProvider>(sp =>
+    new LLMClientProvider(
+        sp.GetRequiredService<ClaudePermissionAnalyzer.Api.Services.ConfigurationManager>(),
+        sp.GetRequiredService<ILoggerFactory>(),
+        sp.GetRequiredService<ILogger<LLMClientProvider>>()));
+
+// Forward ILLMClient to LLMClientProvider for backward compatibility
+builder.Services.AddSingleton<ILLMClient>(sp => sp.GetRequiredService<LLMClientProvider>());
 
 builder.Services.AddSingleton(sp =>
     new PromptTemplateService(promptsDir, sp.GetRequiredService<ILogger<PromptTemplateService>>()));
@@ -136,7 +134,7 @@ builder.Services.AddSingleton(sp =>
 builder.Services.AddSingleton<HookHandlerFactory>(sp =>
     new HookHandlerFactory(
         sp,
-        sp.GetRequiredService<ILLMClient>(),
+        sp.GetRequiredService<LLMClientProvider>(),
         sp.GetRequiredService<PromptTemplateService>(),
         sp.GetRequiredService<SessionManager>(),
         sp.GetRequiredService<ILogger<HookHandlerFactory>>()));
@@ -172,6 +170,11 @@ builder.Services.AddSingleton<HookInstaller>(sp =>
     new HookInstaller(
         sp.GetRequiredService<ILogger<HookInstaller>>(),
         sp.GetRequiredService<ClaudePermissionAnalyzer.Api.Services.ConfigurationManager>(),
+        $"http://{config.Server.Host}:{config.Server.Port}"));
+
+builder.Services.AddSingleton<CopilotHookInstaller>(sp =>
+    new CopilotHookInstaller(
+        sp.GetRequiredService<ILogger<CopilotHookInstaller>>(),
         $"http://{config.Server.Host}:{config.Server.Port}"));
 
 // Add OpenAPI/Swagger documentation
@@ -212,7 +215,9 @@ await adaptiveService.LoadAsync();
 
 // ---- Hook installation logic ----
 var hookInstaller = app.Services.GetRequiredService<HookInstaller>();
+var copilotHookInstaller = app.Services.GetRequiredService<CopilotHookInstaller>();
 bool hooksInstalledThisSession = false;
+bool copilotHooksInstalledThisSession = false;
 
 if (installHooks)
 {
@@ -235,7 +240,41 @@ else if (!noHooks)
         }
         else
         {
-            Console.WriteLine("Skipping hook installation. Use --install-hooks to install later.");
+            Console.WriteLine("Skipping Claude hook installation. Use --install-hooks to install later.");
+        }
+    }
+}
+
+// Copilot hook installation
+if (installCopilotHooks)
+{
+    if (!string.IsNullOrEmpty(copilotRepoPath))
+    {
+        copilotHookInstaller.InstallRepo(copilotRepoPath);
+        Console.WriteLine($"Copilot hooks installed at repo level: {copilotRepoPath}");
+    }
+    else
+    {
+        copilotHookInstaller.InstallUser();
+        Console.WriteLine("Copilot hooks installed at user level.");
+    }
+    copilotHooksInstalledThisSession = true;
+}
+else if (!noHooks && !installHooks)
+{
+    if (Environment.UserInteractive && !Console.IsInputRedirected)
+    {
+        Console.Write("Install Copilot CLI hooks? [y/N]: ");
+        var copilotResponse = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (copilotResponse == "y" || copilotResponse == "yes")
+        {
+            copilotHookInstaller.InstallUser();
+            copilotHooksInstalledThisSession = true;
+            Console.WriteLine("Copilot hooks installed at user level.");
+        }
+        else
+        {
+            Console.WriteLine("Skipping Copilot hook installation. Use --install-copilot-hooks to install later.");
         }
     }
 }
@@ -265,7 +304,24 @@ lifetime.ApplicationStopping.Register(() =>
         catch (Exception ex)
         {
             var logger = app.Services.GetRequiredService<ILogger<Program>>();
-            logger.LogError(ex, "Failed to uninstall hooks during shutdown");
+            logger.LogError(ex, "Failed to uninstall Claude hooks during shutdown");
+        }
+    }
+
+    if (copilotHooksInstalledThisSession)
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(copilotRepoPath))
+                copilotHookInstaller.UninstallRepo(copilotRepoPath);
+            else
+                copilotHookInstaller.UninstallUser();
+            Console.WriteLine("Copilot hooks removed on shutdown.");
+        }
+        catch (Exception ex)
+        {
+            var logger = app.Services.GetRequiredService<ILogger<Program>>();
+            logger.LogError(ex, "Failed to uninstall Copilot hooks during shutdown");
         }
     }
 
