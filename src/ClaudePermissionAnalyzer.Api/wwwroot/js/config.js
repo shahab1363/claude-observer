@@ -34,6 +34,13 @@ const HOOK_EVENT_DESCRIPTIONS = {
     'Stop': 'Fires when a Claude session ends. Used for session cleanup.'
 };
 
+const MODE_BADGE_COLORS = {
+    'llm-analysis': 'var(--color-info)',
+    'log-only': 'var(--text-faint)',
+    'context-injection': 'var(--color-warning)',
+    'custom-logic': 'var(--color-success)'
+};
+
 async function refreshData() {
     await loadConfig();
 }
@@ -111,9 +118,13 @@ function renderConfig(config) {
                     <small>LLM backend used for analysis</small>
                 </label>
                 <select id="cfg-provider" class="config-input"
-                    data-path="llm.provider" aria-label="LLM provider">
-                    <option value="claude-cli" ${(config.llm?.provider || 'claude-cli') === 'claude-cli' ? 'selected' : ''}>Claude Code CLI</option>
+                    data-path="llm.provider" aria-label="LLM provider"
+                    onchange="updateProviderFields()">
+                    <option value="anthropic-api" ${(config.llm?.provider || 'anthropic-api') === 'anthropic-api' ? 'selected' : ''}>Anthropic API (Direct)</option>
+                    <option value="claude-cli" ${config.llm?.provider === 'claude-cli' ? 'selected' : ''}>Claude Code CLI (One-shot)</option>
+                    <option value="claude-persistent" ${config.llm?.provider === 'claude-persistent' ? 'selected' : ''}>Claude Code CLI (Persistent)</option>
                     <option value="copilot-cli" ${config.llm?.provider === 'copilot-cli' ? 'selected' : ''}>GitHub Copilot CLI</option>
+                    <option value="generic-rest" ${config.llm?.provider === 'generic-rest' ? 'selected' : ''}>Generic REST API</option>
                 </select>
             </div>
             <div class="config-field">
@@ -133,6 +144,90 @@ function renderConfig(config) {
                 <input id="cfg-timeout" class="config-input" type="number"
                     value="${config.llm?.timeout || 30000}" min="1000" max="300000"
                     data-path="llm.timeout" aria-label="LLM timeout">
+            </div>
+
+            <!-- Anthropic API fields -->
+            <div id="provider-anthropic-api" class="provider-fields">
+                <div class="config-field">
+                    <label class="config-label" for="cfg-apikey">
+                        API Key
+                        <small>Anthropic API key (falls back to ~/.claude/config.json)</small>
+                    </label>
+                    <input id="cfg-apikey" class="config-input" type="password"
+                        value="${escapeAttr(config.llm?.apiKey || '')}"
+                        placeholder="(uses Claude config key)"
+                        data-path="llm.apiKey" aria-label="API key"
+                        autocomplete="off">
+                </div>
+                <div class="config-field">
+                    <label class="config-label" for="cfg-apibaseurl">
+                        API Base URL
+                        <small>Override for proxies or compatible APIs</small>
+                    </label>
+                    <input id="cfg-apibaseurl" class="config-input" type="text"
+                        value="${escapeAttr(config.llm?.apiBaseUrl || '')}"
+                        placeholder="https://api.anthropic.com"
+                        data-path="llm.apiBaseUrl" aria-label="API base URL">
+                </div>
+            </div>
+
+            <!-- CLI provider fields -->
+            <div id="provider-cli" class="provider-fields">
+                <div class="config-field">
+                    <label class="config-label" for="cfg-command">
+                        CLI Command
+                        <small>Executable name (e.g. "claude", "copilot", "gh")</small>
+                    </label>
+                    <input id="cfg-command" class="config-input" type="text"
+                        value="${escapeAttr(config.llm?.command || '')}"
+                        placeholder="auto-detect"
+                        data-path="llm.command" aria-label="CLI command">
+                </div>
+            </div>
+
+            <!-- Generic REST fields -->
+            <div id="provider-generic-rest" class="provider-fields">
+                <div class="config-field">
+                    <label class="config-label" for="cfg-rest-url">
+                        REST URL
+                        <small>Endpoint URL (e.g. https://api.openai.com/v1/chat/completions)</small>
+                    </label>
+                    <input id="cfg-rest-url" class="config-input" type="text"
+                        value="${escapeAttr(config.llm?.genericRest?.url || '')}"
+                        placeholder="https://api.openai.com/v1/chat/completions"
+                        data-path="llm.genericRest.url" aria-label="REST URL"
+                        style="width: 350px;">
+                </div>
+                <div class="config-field">
+                    <label class="config-label" for="cfg-rest-headers">
+                        Headers (JSON)
+                        <small>e.g. {"Authorization": "Bearer sk-..."}</small>
+                    </label>
+                    <textarea id="cfg-rest-headers" class="config-input" rows="3"
+                        placeholder='{"Authorization": "Bearer sk-..."}'
+                        data-path="llm.genericRest.headers" aria-label="REST headers"
+                        style="width: 350px; font-family: var(--font-mono); font-size: 12px;">${escapeHtml(JSON.stringify(config.llm?.genericRest?.headers || {}, null, 2))}</textarea>
+                </div>
+                <div class="config-field">
+                    <label class="config-label" for="cfg-rest-body">
+                        Body Template
+                        <small>JSON with {PROMPT} placeholder</small>
+                    </label>
+                    <textarea id="cfg-rest-body" class="config-input" rows="5"
+                        placeholder='{"model":"gpt-4","messages":[{"role":"user","content":"{PROMPT}"}]}'
+                        data-path="llm.genericRest.bodyTemplate" aria-label="REST body template"
+                        style="width: 350px; font-family: var(--font-mono); font-size: 12px;">${escapeHtml(config.llm?.genericRest?.bodyTemplate || '')}</textarea>
+                </div>
+                <div class="config-field">
+                    <label class="config-label" for="cfg-rest-path">
+                        Response Path
+                        <small>Dot-notation to extract text (e.g. choices[0].message.content)</small>
+                    </label>
+                    <input id="cfg-rest-path" class="config-input" type="text"
+                        value="${escapeAttr(config.llm?.genericRest?.responsePath || '')}"
+                        placeholder="choices[0].message.content"
+                        data-path="llm.genericRest.responsePath" aria-label="Response path">
+                </div>
             </div>
         </div>
 
@@ -173,6 +268,21 @@ function renderConfig(config) {
             updateSaveButton();
         });
     });
+
+    // Show/hide provider-specific fields
+    updateProviderFields();
+}
+
+function updateProviderFields() {
+    const provider = document.getElementById('cfg-provider')?.value || 'anthropic-api';
+
+    const apiFields = document.getElementById('provider-anthropic-api');
+    const cliFields = document.getElementById('provider-cli');
+    const restFields = document.getElementById('provider-generic-rest');
+
+    if (apiFields) apiFields.style.display = provider === 'anthropic-api' ? 'block' : 'none';
+    if (cliFields) cliFields.style.display = ['claude-cli', 'claude-persistent', 'copilot-cli'].includes(provider) ? 'block' : 'none';
+    if (restFields) restFields.style.display = provider === 'generic-rest' ? 'block' : 'none';
 }
 
 function updateSaveButton() {
@@ -208,6 +318,10 @@ async function saveConfig() {
         const path = input.dataset.path;
         if (!path) return;
 
+        // Skip hidden provider fields to avoid overwriting config with empty values
+        const providerSection = input.closest('.provider-fields');
+        if (providerSection && providerSection.style.display === 'none') return;
+
         const parts = path.split('.');
         let obj = updated;
         for (let i = 0; i < parts.length - 1; i++) {
@@ -218,6 +332,13 @@ async function saveConfig() {
         const key = parts[parts.length - 1];
         if (input.type === 'number') {
             obj[key] = parseInt(input.value, 10);
+        } else if (key === 'headers' && input.tagName === 'TEXTAREA') {
+            // Parse JSON for headers field
+            try {
+                obj[key] = JSON.parse(input.value || '{}');
+            } catch {
+                obj[key] = {};
+            }
         } else {
             obj[key] = input.value;
         }
@@ -282,17 +403,11 @@ function renderHookHandlers() {
         const description = HOOK_EVENT_DESCRIPTIONS[eventType] || '';
 
         html += `
-        <div class="hook-event-card" data-event="${escapeAttr(eventType)}" style="
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-md);
-            padding: 16px;
-            margin-bottom: 12px;
-            background: var(--bg-tertiary);
-        ">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <h4 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin: 0;">${escapeHtml(eventType)}</h4>
-                    <label style="display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--text-muted); cursor: pointer;">
+        <div class="hook-event-card" data-event="${escapeAttr(eventType)}">
+            <div class="hook-event-header">
+                <div class="hook-event-title">
+                    <h4>${escapeHtml(eventType)}</h4>
+                    <label class="hook-event-toggle">
                         <input type="checkbox" ${enabled ? 'checked' : ''}
                             onchange="toggleHookEvent('${escapeAttr(eventType)}', this.checked)"
                             style="cursor: pointer;">
@@ -301,10 +416,10 @@ function renderHookHandlers() {
                 </div>
                 <button class="btn btn-sm" onclick="addHandler('${escapeAttr(eventType)}')" style="font-size: 11px;">+ Add Handler</button>
             </div>
-            <p style="font-size: 11px; color: var(--text-faint); margin-bottom: 12px;">${escapeHtml(description)}</p>
+            <p class="hook-event-desc">${escapeHtml(description)}</p>
             <div id="handlers-${escapeAttr(eventType)}">
                 ${handlers.length === 0
-                    ? '<p style="font-size: 12px; color: var(--text-faint); font-style: italic; padding: 8px 0;">No handlers configured. Click "+ Add Handler" to create one.</p>'
+                    ? '<p class="hook-empty-msg">No handlers configured. Click "+ Add Handler" to create one.</p>'
                     : handlers.map((h, idx) => renderHandlerRow(eventType, h, idx, false)).join('')
                 }
             </div>
@@ -315,62 +430,26 @@ function renderHookHandlers() {
 }
 
 function renderHandlerRow(eventType, handler, index, editing) {
-    const safeEvent = escapeAttr(eventType);
-    const rowId = `handler-${safeEvent}-${index}`;
-
     if (editing) {
         return renderHandlerEditRow(eventType, handler, index);
     }
 
-    const modeBadgeColor = {
-        'llm-analysis': 'var(--color-info)',
-        'log-only': 'var(--text-faint)',
-        'context-injection': 'var(--color-warning)',
-        'custom-logic': 'var(--color-success)'
-    };
-    const badgeColor = modeBadgeColor[handler.mode] || 'var(--text-faint)';
+    const safeEvent = escapeAttr(eventType);
+    const rowId = `handler-${safeEvent}-${index}`;
+    const badgeColor = MODE_BADGE_COLORS[handler.mode] || 'var(--text-faint)';
+    const promptFile = handler.promptTemplate ? handler.promptTemplate.replace(/^.*[\\\/]/, '') : '';
 
     return `
-    <div id="${rowId}" style="
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 8px 10px;
-        border: 1px solid var(--border-light);
-        border-radius: var(--radius-sm);
-        margin-bottom: 6px;
-        background: var(--bg-secondary);
-        font-size: 12px;
-    ">
-        <div style="flex: 1; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0;">
-            <span style="font-weight: 600; color: var(--text-primary); min-width: 80px;" title="Handler name">${escapeHtml(handler.name || '(unnamed)')}</span>
-            <span style="
-                display: inline-block;
-                padding: 2px 8px;
-                border-radius: 10px;
-                background: ${badgeColor};
-                color: #fff;
-                font-size: 10px;
-                font-weight: 500;
-                white-space: nowrap;
-            " title="Mode">${escapeHtml(handler.mode || 'log-only')}</span>
-            <code style="
-                font-family: var(--font-mono);
-                font-size: 11px;
-                color: var(--text-muted);
-                background: var(--bg-tertiary);
-                padding: 1px 6px;
-                border-radius: 3px;
-                max-width: 200px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            " title="Matcher pattern: ${escapeAttr(handler.matcher || '*')}">${escapeHtml(handler.matcher || '*')}</code>
-            <span style="color: var(--text-faint); white-space: nowrap; font-size: 0.9em;" title="Thresholds: Strict / Moderate / Permissive">S:<strong style="color: var(--text-secondary);">${handler.thresholdStrict || 95}</strong> M:<strong style="color: var(--text-secondary);">${handler.thresholdModerate || 85}</strong> P:<strong style="color: var(--text-secondary);">${handler.thresholdPermissive || 70}</strong></span>
-            ${handler.autoApprove ? '<span style="color: var(--color-success); white-space: nowrap;" title="Auto-approve enabled">Auto-approve</span>' : ''}
-            ${handler.promptTemplate ? `<span style="color: var(--text-faint); white-space: nowrap; max-width: 150px; overflow: hidden; text-overflow: ellipsis;" title="Prompt: ${escapeAttr(handler.promptTemplate)}">Prompt: ${escapeHtml(handler.promptTemplate.replace(/^.*[\\\/]/, ''))}</span>` : ''}
+    <div id="${rowId}" class="handler-row">
+        <div class="handler-row-details">
+            <span class="handler-name" title="Handler name">${escapeHtml(handler.name || '(unnamed)')}</span>
+            <span class="handler-mode-badge" style="background: ${badgeColor};" title="Mode">${escapeHtml(handler.mode || 'log-only')}</span>
+            <code class="handler-matcher" title="Matcher pattern: ${escapeAttr(handler.matcher || '*')}">${escapeHtml(handler.matcher || '*')}</code>
+            <span class="handler-thresholds" title="Thresholds: Strict / Moderate / Permissive">S:<strong>${handler.thresholdStrict || 95}</strong> M:<strong>${handler.thresholdModerate || 85}</strong> P:<strong>${handler.thresholdPermissive || 70}</strong></span>
+            ${handler.autoApprove ? '<span class="handler-auto-approve" title="Auto-approve enabled">Auto-approve</span>' : ''}
+            ${promptFile ? `<span class="handler-prompt-label" title="Prompt: ${escapeAttr(handler.promptTemplate)}">Prompt: ${escapeHtml(promptFile)}</span>` : ''}
         </div>
-        <div style="display: flex; gap: 4px; flex-shrink: 0;">
+        <div class="handler-actions">
             <button class="btn btn-sm" onclick="editHandler('${safeEvent}', ${index})" style="font-size: 11px; padding: 2px 8px;">Edit</button>
             <button class="btn btn-sm" onclick="removeHandler('${safeEvent}', ${index})" style="font-size: 11px; padding: 2px 8px; color: var(--color-danger); border-color: var(--color-danger);">Remove</button>
         </div>
@@ -392,66 +471,57 @@ function renderHandlerEditRow(eventType, handler, index) {
     ).join('');
 
     return `
-    <div id="${rowId}" style="
-        padding: 12px;
-        border: 2px solid var(--accent-primary);
-        border-radius: var(--radius-sm);
-        margin-bottom: 6px;
-        background: var(--bg-secondary);
-        font-size: 12px;
-    ">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;">
+    <div id="${rowId}" class="handler-edit-card">
+        <div class="handler-edit-grid">
             <div>
-                <label style="display: block; font-size: 11px; color: var(--text-faint); margin-bottom: 2px; font-weight: 500;">Name</label>
+                <label class="handler-edit-label">Name</label>
                 <input type="text" id="${rowId}-name" value="${escapeAttr(handler.name || '')}"
                     placeholder="e.g. bash-analyzer"
-                    style="width: 100%; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-secondary); font-size: 12px; font-family: var(--font-mono);">
+                    class="handler-edit-input handler-edit-input-mono">
             </div>
             <div>
-                <label style="display: block; font-size: 11px; color: var(--text-faint); margin-bottom: 2px; font-weight: 500;">Matcher Pattern (regex)</label>
+                <label class="handler-edit-label">Matcher Pattern (regex)</label>
                 <input type="text" id="${rowId}-matcher" value="${escapeAttr(handler.matcher || '')}"
                     placeholder="e.g. Bash|Write or *"
-                    style="width: 100%; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-secondary); font-size: 12px; font-family: var(--font-mono);">
+                    class="handler-edit-input handler-edit-input-mono">
             </div>
             <div>
-                <label style="display: block; font-size: 11px; color: var(--text-faint); margin-bottom: 2px; font-weight: 500;">Mode</label>
-                <select id="${rowId}-mode"
-                    style="width: 100%; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-secondary); font-size: 12px;">
+                <label class="handler-edit-label">Mode</label>
+                <select id="${rowId}-mode" class="handler-edit-input">
                     ${modeOptions}
                 </select>
             </div>
             <div>
-                <label style="display: block; font-size: 11px; color: var(--text-faint); margin-bottom: 2px; font-weight: 500;">Prompt Template</label>
-                <select id="${rowId}-prompt"
-                    style="width: 100%; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-secondary); font-size: 12px;">
+                <label class="handler-edit-label">Prompt Template</label>
+                <select id="${rowId}-prompt" class="handler-edit-input">
                     <option value="">(none)</option>
                     ${promptOptions}
                 </select>
             </div>
             <div>
-                <label style="display: block; font-size: 11px; color: var(--text-faint); margin-bottom: 2px; font-weight: 500;">Strict Threshold</label>
+                <label class="handler-edit-label">Strict Threshold</label>
                 <input type="number" id="${rowId}-thresholdStrict" value="${handler.thresholdStrict != null ? handler.thresholdStrict : 95}"
-                    min="0" max="100" style="width: 100%; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-secondary); font-size: 12px; font-family: var(--font-mono);">
+                    min="0" max="100" class="handler-edit-input handler-edit-input-mono">
             </div>
             <div>
-                <label style="display: block; font-size: 11px; color: var(--text-faint); margin-bottom: 2px; font-weight: 500;">Moderate Threshold</label>
+                <label class="handler-edit-label">Moderate Threshold</label>
                 <input type="number" id="${rowId}-thresholdModerate" value="${handler.thresholdModerate != null ? handler.thresholdModerate : 85}"
-                    min="0" max="100" style="width: 100%; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-secondary); font-size: 12px; font-family: var(--font-mono);">
+                    min="0" max="100" class="handler-edit-input handler-edit-input-mono">
             </div>
             <div>
-                <label style="display: block; font-size: 11px; color: var(--text-faint); margin-bottom: 2px; font-weight: 500;">Permissive Threshold</label>
+                <label class="handler-edit-label">Permissive Threshold</label>
                 <input type="number" id="${rowId}-thresholdPermissive" value="${handler.thresholdPermissive != null ? handler.thresholdPermissive : 70}"
-                    min="0" max="100" style="width: 100%; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-secondary); font-size: 12px; font-family: var(--font-mono);">
+                    min="0" max="100" class="handler-edit-input handler-edit-input-mono">
             </div>
-            <div style="display: flex; align-items: flex-end;">
-                <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer; padding-bottom: 4px;">
+            <div class="handler-edit-checkbox">
+                <label>
                     <input type="checkbox" id="${rowId}-autoapprove" ${handler.autoApprove ? 'checked' : ''}
                         style="cursor: pointer;">
                     Auto-approve when safe
                 </label>
             </div>
         </div>
-        <div style="display: flex; gap: 6px; justify-content: flex-end;">
+        <div class="handler-edit-actions">
             <button class="btn btn-sm" onclick="cancelEditHandler('${safeEvent}', ${index})" style="font-size: 11px; padding: 3px 10px;">Cancel</button>
             <button class="btn btn-sm btn-primary" onclick="applyEditHandler('${safeEvent}', ${index})" style="font-size: 11px; padding: 3px 10px;">Apply</button>
         </div>
@@ -497,7 +567,6 @@ function removeHandler(eventType, index) {
         if (!confirm(`Remove handler "${name}" from ${eventType}?`)) return;
         eventConfig.handlers.splice(index, 1);
         markHookHandlersDirty();
-        // Re-render this event's handlers
         renderEventHandlers(eventType);
     }
 }
@@ -561,7 +630,7 @@ function renderEventHandlers(eventType) {
     const handlers = eventConfig.handlers || [];
 
     if (handlers.length === 0) {
-        handlersContainer.innerHTML = '<p style="font-size: 12px; color: var(--text-faint); font-style: italic; padding: 8px 0;">No handlers configured. Click "+ Add Handler" to create one.</p>';
+        handlersContainer.innerHTML = '<p class="hook-empty-msg">No handlers configured. Click "+ Add Handler" to create one.</p>';
     } else {
         handlersContainer.innerHTML = handlers.map((h, idx) => renderHandlerRow(eventType, h, idx, false)).join('');
     }
@@ -589,7 +658,6 @@ async function saveHookHandlers() {
                         if (!h.promptTemplate) {
                             delete h.promptTemplate;
                         }
-                        // Clean up the config dict if empty
                         if (h.config && Object.keys(h.config).length === 0) {
                             delete h.config;
                         }

@@ -147,6 +147,12 @@ function buildLogEntryHtml(log, i) {
                     <div class="detail-label">Session</div>
                     <a href="/session.html?id=${encodeURIComponent(log.sessionId)}" class="detail-link">${escapeHtml(log.sessionId)}</a>
                 </div>
+                <div class="detail-section detail-actions">
+                    <button class="btn-replay" onclick="replayLogEntry(this)"
+                        data-log='${escapeHtml(JSON.stringify({toolName: log.toolName, toolInput: log.toolInput, promptTemplate: log.promptTemplate, sessionId: log.sessionId, hookEventName: log.type, cwd: log.cwd}))}'
+                    >Replay to LLM</button>
+                    <span class="replay-status"></span>
+                </div>
             </div>
         </div>
     `;
@@ -275,27 +281,113 @@ async function loadSessionFilter() {
             opt.title = s.sessionId;
             select.appendChild(opt);
         });
+        // Restore saved session filter after options are populated
+        var savedSession = loadFilter('cpa-logs-filter-session', '');
+        if (savedSession) select.value = savedSession;
     } catch { /* non-fatal */ }
 }
 
-document.addEventListener('DOMContentLoaded', () => {
-    loadSessionFilter();
+document.addEventListener('DOMContentLoaded', async () => {
+    // Restore saved filter values before first load
+    var filterIds = [
+        { id: 'filterDecision', key: 'cpa-logs-filter-decision' },
+        { id: 'filterCategory', key: 'cpa-logs-filter-category' },
+        { id: 'filterHookType', key: 'cpa-logs-filter-hooktype' },
+        { id: 'filterTool', key: 'cpa-logs-filter-tool' },
+        { id: 'filterLimit', key: 'cpa-logs-filter-limit' }
+    ];
+    filterIds.forEach(function(f) {
+        var el = document.getElementById(f.id);
+        if (el) {
+            var saved = loadFilter(f.key, '');
+            if (saved) el.value = saved;
+        }
+    });
+
+    // Restore checkbox states
+    var chkAutoScroll = document.getElementById('chkAutoScrollLogs');
+    if (chkAutoScroll) chkAutoScroll.checked = loadFilter('cpa-logs-autoscroll', true);
+    var chkAutoRefresh = document.getElementById('chkAutoRefreshLogs');
+    if (chkAutoRefresh) chkAutoRefresh.checked = loadFilter('cpa-logs-autorefresh', true);
+
+    // Await session filter population so its saved value is applied before first load
+    await loadSessionFilter();
     loadLogs(true);
 
-    // Filter changes force a full re-render
-    document.getElementById('filterDecision')?.addEventListener('change', function() { loadLogs(true); });
-    document.getElementById('filterCategory')?.addEventListener('change', function() { loadLogs(true); });
-    document.getElementById('filterHookType')?.addEventListener('change', function() { loadLogs(true); });
-    document.getElementById('filterTool')?.addEventListener('change', function() { loadLogs(true); });
-    document.getElementById('filterSession')?.addEventListener('change', function() { loadLogs(true); });
-    document.getElementById('filterLimit')?.addEventListener('change', function() { loadLogs(true); });
+    // Filter changes force a full re-render and persist selection
+    document.getElementById('filterDecision')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-decision', this.value); loadLogs(true); });
+    document.getElementById('filterCategory')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-category', this.value); loadLogs(true); });
+    document.getElementById('filterHookType')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-hooktype', this.value); loadLogs(true); });
+    document.getElementById('filterTool')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-tool', this.value); loadLogs(true); });
+    document.getElementById('filterSession')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-session', this.value); loadLogs(true); });
+    document.getElementById('filterLimit')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-limit', this.value); loadLogs(true); });
 
-    var chkAutoRefresh = document.getElementById('chkAutoRefreshLogs');
+    if (chkAutoScroll) {
+        chkAutoScroll.addEventListener('change', function() { saveFilter('cpa-logs-autoscroll', this.checked); });
+    }
+
     if (chkAutoRefresh) {
         if (chkAutoRefresh.checked) startLogsAutoRefresh();
         chkAutoRefresh.addEventListener('change', function() {
+            saveFilter('cpa-logs-autorefresh', this.checked);
             if (this.checked) startLogsAutoRefresh();
             else stopLogsAutoRefresh();
         });
     }
 });
+
+async function replayLogEntry(btn) {
+    var logData;
+    try {
+        logData = JSON.parse(btn.dataset.log);
+    } catch {
+        Toast.show('Error', 'Failed to parse log data', 'danger');
+        return;
+    }
+
+    var statusEl = btn.nextElementSibling;
+    btn.disabled = true;
+    btn.textContent = 'Sending...';
+    if (statusEl) statusEl.textContent = '';
+
+    // Open terminal panel to show subprocess output
+    if (typeof TerminalPanel !== 'undefined') {
+        TerminalPanel.open();
+    }
+
+    try {
+        var response = await fetch('/api/debug/llm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                toolName: logData.toolName,
+                toolInput: logData.toolInput,
+                promptTemplate: logData.promptTemplate,
+                sessionId: logData.sessionId,
+                hookEventName: logData.hookEventName,
+                cwd: logData.cwd
+            })
+        });
+        var result = await response.json();
+
+        if (result.success) {
+            if (statusEl) {
+                statusEl.innerHTML = `<span class="replay-result">Score: <strong>${result.safetyScore}</strong> | Category: <strong>${result.category}</strong> | ${result.elapsedMs}ms</span>`;
+            }
+            Toast.show('Replay Complete', `Score: ${result.safetyScore} (${result.category}) in ${result.elapsedMs}ms`, 'success');
+        } else {
+            if (statusEl) {
+                statusEl.innerHTML = `<span class="replay-result replay-error">Error: ${escapeHtml(result.error || 'Unknown error')}</span>`;
+            }
+            Toast.show('Replay Failed', result.error || 'LLM query failed', 'danger');
+        }
+    } catch (err) {
+        if (statusEl) {
+            statusEl.innerHTML = `<span class="replay-result replay-error">Error: ${escapeHtml(err.message)}</span>`;
+        }
+        Toast.show('Replay Error', err.message, 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Replay to LLM';
+    }
+}

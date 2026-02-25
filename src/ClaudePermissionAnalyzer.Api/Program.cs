@@ -116,11 +116,19 @@ builder.Services.AddSingleton(sp =>
         sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
         sp.GetRequiredService<ILogger<SessionManager>>()));
 
+builder.Services.AddSingleton<TerminalOutputService>();
+
+// Register HttpClient for LLM API clients (Anthropic, Generic REST)
+builder.Services.AddHttpClient("LLMClient")
+    .ConfigureHttpClient(c => c.Timeout = TimeSpan.FromMinutes(5));
+
 builder.Services.AddSingleton<LLMClientProvider>(sp =>
     new LLMClientProvider(
         sp.GetRequiredService<ClaudePermissionAnalyzer.Api.Services.ConfigurationManager>(),
         sp.GetRequiredService<ILoggerFactory>(),
-        sp.GetRequiredService<ILogger<LLMClientProvider>>()));
+        sp.GetRequiredService<ILogger<LLMClientProvider>>(),
+        sp.GetRequiredService<IHttpClientFactory>(),
+        sp.GetRequiredService<TerminalOutputService>()));
 
 // Forward ILLMClient to LLMClientProvider for backward compatibility
 builder.Services.AddSingleton<ILLMClient>(sp => sp.GetRequiredService<LLMClientProvider>());

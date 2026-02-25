@@ -1,81 +1,108 @@
 using ClaudePermissionAnalyzer.Api.Models;
 using Microsoft.Extensions.Logging;
 using System.Diagnostics;
-using System.Text;
-using System.Text.RegularExpressions;
 
 namespace ClaudePermissionAnalyzer.Api.Services;
 
 /// <summary>
-/// LLM client that uses GitHub Copilot CLI (gh copilot explain) for safety analysis.
+/// LLM client that uses a Copilot CLI command for safety analysis.
+/// By default uses "copilot" but can be configured to "gh" (with "copilot" as first arg).
 /// Parses text responses heuristically to produce structured safety scores.
 /// </summary>
-public class CopilotCliClient : ILLMClient
+public class CopilotCliClient : LLMClientBase, ILLMClient
 {
     private readonly LlmConfig _config;
+    private readonly ConfigurationManager? _configManager;
     private readonly ILogger<CopilotCliClient>? _logger;
 
-    private const int MaxTimeoutMs = 300_000;
-    private const int MaxOutputSize = 1_048_576;
+    private const int MaxRetries = 3;
 
-    public CopilotCliClient(LlmConfig config, ILogger<CopilotCliClient>? logger = null)
+    public CopilotCliClient(LlmConfig config, ILogger<CopilotCliClient>? logger = null,
+        ConfigurationManager? configManager = null, TerminalOutputService? terminalOutput = null)
+        : base(configManager, config, terminalOutput)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _logger = logger;
+        _configManager = configManager;
+    }
+
+    /// <summary>
+    /// Gets the CLI command to use. Defaults to "copilot".
+    /// When set to "gh", "copilot" is passed as the first argument.
+    /// </summary>
+    private (string fileName, bool addCopilotArg) GetCommand()
+    {
+        var cmd = _configManager?.GetConfiguration()?.Llm?.Command ?? _config.Command;
+        if (string.IsNullOrWhiteSpace(cmd))
+            cmd = "copilot";
+
+        if (cmd.Equals("gh", StringComparison.OrdinalIgnoreCase))
+            return ("gh", true);
+
+        return (cmd, false);
     }
 
     public async Task<LLMResponse> QueryAsync(string prompt, CancellationToken cancellationToken = default)
     {
-        var timeout = Math.Clamp(_config.Timeout, 1000, MaxTimeoutMs);
-        var sw = Stopwatch.StartNew();
+        var timeout = CurrentTimeout;
+        var totalSw = Stopwatch.StartNew();
 
-        try
+        for (int attempt = 1; attempt <= MaxRetries; attempt++)
         {
-            var output = await ExecuteGhCopilotAsync(prompt, timeout, cancellationToken).ConfigureAwait(false);
-            sw.Stop();
+            cancellationToken.ThrowIfCancellationRequested();
 
-            var response = ParseTextResponse(output);
-            response.ElapsedMs = sw.ElapsedMilliseconds;
-            _logger?.LogInformation("Copilot CLI query completed in {Elapsed}ms", sw.ElapsedMilliseconds);
-            return response;
-        }
-        catch (TimeoutException ex)
-        {
-            sw.Stop();
-            return new LLMResponse
+            var sw = Stopwatch.StartNew();
+            try
             {
-                Success = false,
-                Error = $"Copilot CLI query timed out after {timeout}ms: {ex.Message}",
-                SafetyScore = 0,
-                Reasoning = $"Copilot CLI query timed out after {timeout}ms",
-                ElapsedMs = sw.ElapsedMilliseconds
-            };
-        }
-        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 2)
-        {
-            return new LLMResponse
+                var output = await ExecuteCopilotAsync(prompt, timeout, cancellationToken).ConfigureAwait(false);
+                sw.Stop();
+
+                var response = ParseTextResponse(output);
+                response.ElapsedMs = sw.ElapsedMilliseconds;
+                _logger?.LogInformation("Copilot CLI query completed in {Elapsed}ms", sw.ElapsedMilliseconds);
+                return response;
+            }
+            catch (TimeoutException) when (attempt < MaxRetries)
             {
-                Success = false,
-                Error = "GitHub CLI not found - ensure 'gh' command is installed and in PATH with Copilot extension",
-                SafetyScore = 0,
-                Reasoning = "GitHub CLI (gh) is not installed or not in PATH"
-            };
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger?.LogError(ex, "Copilot CLI query failed");
-            return new LLMResponse
+                sw.Stop();
+                TerminalOutput?.Push("copilot-cli", "stderr",
+                    $"Attempt {attempt}/{MaxRetries} timed out after {timeout}ms -- retrying...");
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
             {
-                Success = false,
-                Error = "Copilot CLI query failed",
-                SafetyScore = 0,
-                Reasoning = "Copilot CLI query failed due to invalid operation"
-            };
+                totalSw.Stop();
+                TerminalOutput?.Push("copilot-cli", "stderr",
+                    $"All {MaxRetries} attempts timed out ({totalSw.ElapsedMilliseconds}ms total)");
+                return CreateTimeoutResponse("Copilot CLI", MaxRetries, timeout, totalSw.ElapsedMilliseconds);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 2)
+            {
+                var (cmd, _) = GetCommand();
+                return CreateFailureResponse(
+                    $"CLI command '{cmd}' not found - ensure it is installed and in PATH",
+                    $"CLI command '{cmd}' is not installed or not in PATH");
+            }
+            catch (InvalidOperationException) when (attempt < MaxRetries)
+            {
+                sw.Stop();
+                TerminalOutput?.Push("copilot-cli", "stderr",
+                    $"Attempt {attempt}/{MaxRetries} failed -- retrying...");
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger?.LogError(ex, "Copilot CLI query failed after {MaxRetries} attempts", MaxRetries);
+                return CreateFailureResponse("Copilot CLI query failed",
+                    "Copilot CLI query failed due to invalid operation");
+            }
         }
+
+        return CreateRetriesExhaustedResponse("Copilot CLI");
     }
 
     /// <summary>
-    /// Parses unstructured text from gh copilot into a structured LLMResponse.
+    /// Parses unstructured text from copilot into a structured LLMResponse.
     /// Uses keyword heuristics since Copilot doesn't return JSON.
     /// </summary>
     internal LLMResponse ParseTextResponse(string output)
@@ -86,7 +113,7 @@ public class CopilotCliClient : ILLMClient
             {
                 Success = false,
                 SafetyScore = 50,
-                Reasoning = "Empty response from Copilot CLI — defaulting to conservative score",
+                Reasoning = "Empty response from Copilot CLI -- defaulting to conservative score",
                 Category = "cautious"
             };
         }
@@ -147,7 +174,7 @@ public class CopilotCliClient : ILLMClient
         }
         else
         {
-            // No strong indicators — conservative default
+            // No strong indicators -- conservative default
             score = 50;
             category = "cautious";
         }
@@ -165,97 +192,36 @@ public class CopilotCliClient : ILLMClient
         };
     }
 
-    private async Task<string> ExecuteGhCopilotAsync(string prompt, int timeoutMs, CancellationToken cancellationToken)
+    private async Task<string> ExecuteCopilotAsync(string prompt, int timeoutMs, CancellationToken cancellationToken)
     {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = "gh",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var (fileName, addCopilotArg) = GetCommand();
 
-        startInfo.ArgumentList.Add("copilot");
-        startInfo.ArgumentList.Add("explain");
+        var startInfo = new ProcessStartInfo { FileName = fileName };
+
+        if (addCopilotArg)
+            startInfo.ArgumentList.Add("copilot");
+        startInfo.ArgumentList.Add("-p");
         startInfo.ArgumentList.Add(prompt);
+        startInfo.ArgumentList.Add("-s");               // Silent: output only response, no stats
+        startInfo.ArgumentList.Add("--allow-all-tools"); // Non-interactive: don't prompt for permissions
+        startInfo.ArgumentList.Add("--no-custom-instructions"); // Don't load AGENTS.md etc.
 
-        // Remove CLAUDECODE env var to avoid interference
-        startInfo.Environment.Remove("CLAUDECODE");
-        startInfo.Environment["CLAUDECODE"] = null!;
-
-        using var process = new Process { StartInfo = startInfo };
-
-        var output = new StringBuilder(512);
-        var error = new StringBuilder(256);
-        var outputTruncated = false;
-
-        process.OutputDataReceived += (_, e) =>
+        // Remove Claude Code nesting-detection env vars to avoid interference
+        foreach (var key in new[] { "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS" })
         {
-            if (e.Data != null && !outputTruncated)
-            {
-                if (output.Length + e.Data.Length > MaxOutputSize)
-                {
-                    outputTruncated = true;
-                    _logger?.LogWarning("Copilot CLI output exceeded {MaxSize} bytes, truncating", MaxOutputSize);
-                }
-                else
-                {
-                    output.AppendLine(e.Data);
-                }
-            }
-        };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) error.AppendLine(e.Data); };
-
-        if (!process.Start())
-        {
-            throw new InvalidOperationException("Failed to start gh copilot process");
+            startInfo.Environment.Remove(key);
+            startInfo.Environment[key] = null!;
         }
 
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
+        var cmdDesc = addCopilotArg ? $"{fileName} copilot" : fileName;
+        TerminalOutput?.Push("copilot-cli", "info",
+            $"$ {cmdDesc} -p \"{PreviewPrompt(prompt, 80)}\" -s --allow-all-tools --no-custom-instructions");
 
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(timeoutMs);
+        var result = await CliProcessRunner.RunAsync(
+            startInfo, timeoutMs, "copilot-cli", cancellationToken,
+            _logger, TerminalOutput
+        ).ConfigureAwait(false);
 
-        try
-        {
-            await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(true);
-                    await Task.Delay(100).ConfigureAwait(false);
-                }
-            }
-            catch (Exception killEx)
-            {
-                _logger?.LogError(killEx, "Failed to kill hung gh copilot process");
-                throw new InvalidOperationException(
-                    $"Copilot CLI timed out after {timeoutMs}ms and process cleanup failed.", killEx);
-            }
-
-            throw new TimeoutException($"Copilot CLI timed out after {timeoutMs}ms");
-        }
-
-        process.CancelOutputRead();
-        process.CancelErrorRead();
-        process.WaitForExit();
-
-        if (process.ExitCode != 0)
-        {
-            var errorMessage = error.ToString().Trim();
-            if (string.IsNullOrEmpty(errorMessage))
-            {
-                errorMessage = $"gh copilot exited with code {process.ExitCode}";
-            }
-            throw new InvalidOperationException($"gh copilot failed with exit code {process.ExitCode}: {errorMessage}");
-        }
-
-        return output.ToString();
+        return result.Output;
     }
 }

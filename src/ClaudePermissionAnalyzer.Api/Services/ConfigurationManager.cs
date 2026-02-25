@@ -192,10 +192,9 @@ public class ConfigurationManager
         {
             Llm = new LlmConfig
             {
-                Provider = "claude-cli",
+                Provider = "anthropic-api",
                 Model = "opus",
                 Timeout = 30000,
-                PersistentProcess = true,
                 SystemPrompt = "You are a security analyzer that evaluates the safety of operations. Always respond ONLY with valid JSON containing safetyScore (0-100), reasoning (string), and category (safe|cautious|risky|dangerous). Never include any text outside the JSON object."
             },
             Server = new ServerConfig

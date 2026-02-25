@@ -4,8 +4,9 @@ using Microsoft.Extensions.Logging;
 namespace ClaudePermissionAnalyzer.Api.Services;
 
 /// <summary>
-/// Runtime LLM provider switcher. Reads config.Llm.Provider on each call
-/// and delegates to the matching client (claude-cli or copilot-cli).
+/// Runtime LLM provider registry and switcher. Maps provider names to factory functions.
+/// Reads config.Llm.Provider on each call and delegates to the matching client.
+/// Caches the active client and recreates it if the provider changes.
 /// Registered as singleton ILLMClient in DI.
 /// </summary>
 public class LLMClientProvider : ILLMClient, IDisposable
@@ -13,86 +14,138 @@ public class LLMClientProvider : ILLMClient, IDisposable
     private readonly ConfigurationManager _configManager;
     private readonly ILoggerFactory _loggerFactory;
     private readonly ILogger<LLMClientProvider> _logger;
+    private readonly TerminalOutputService? _terminalOutput;
+    private readonly IHttpClientFactory? _httpClientFactory;
 
     private readonly object _lock = new();
-    private ClaudeCliClient? _claudeClient;
-    private PersistentClaudeClient? _persistentClaudeClient;
-    private CopilotCliClient? _copilotClient;
+    private ILLMClient? _cachedClient;
+    private string? _cachedProvider;
+
+    private readonly Dictionary<string, Func<LlmConfig, ILLMClient>> _factories;
 
     public LLMClientProvider(
         ConfigurationManager configManager,
         ILoggerFactory loggerFactory,
-        ILogger<LLMClientProvider> logger)
+        ILogger<LLMClientProvider> logger,
+        IHttpClientFactory? httpClientFactory = null,
+        TerminalOutputService? terminalOutput = null)
     {
         _configManager = configManager ?? throw new ArgumentNullException(nameof(configManager));
         _loggerFactory = loggerFactory ?? throw new ArgumentNullException(nameof(loggerFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _httpClientFactory = httpClientFactory;
+        _terminalOutput = terminalOutput;
+
+        _factories = new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["anthropic-api"] = _ => new AnthropicApiClient(
+                CreateHttpClient(),
+                _configManager,
+                _loggerFactory.CreateLogger<AnthropicApiClient>(),
+                _terminalOutput),
+
+            ["claude-cli"] = cfg => new ClaudeCliClient(
+                cfg,
+                _loggerFactory.CreateLogger<ClaudeCliClient>(),
+                _configManager,
+                _terminalOutput),
+
+            ["claude-persistent"] = cfg => new PersistentClaudeClient(
+                cfg,
+                _loggerFactory.CreateLogger<PersistentClaudeClient>(),
+                _terminalOutput,
+                _configManager),
+
+            ["copilot-cli"] = cfg => new CopilotCliClient(
+                cfg,
+                _loggerFactory.CreateLogger<CopilotCliClient>(),
+                _configManager,
+                _terminalOutput),
+
+            ["generic-rest"] = _ => new GenericRestClient(
+                CreateHttpClient(),
+                _configManager,
+                _loggerFactory.CreateLogger<GenericRestClient>(),
+                _terminalOutput),
+        };
     }
 
-    public Task<LLMResponse> QueryAsync(string prompt, CancellationToken cancellationToken = default)
+    public async Task<LLMResponse> QueryAsync(string prompt, CancellationToken cancellationToken = default)
     {
-        var client = GetClient();
-        return client.QueryAsync(prompt, cancellationToken);
+        ILLMClient client;
+        try
+        {
+            client = GetClient();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to initialize LLM provider");
+            return new LLMResponse
+            {
+                Success = false,
+                SafetyScore = 0,
+                Error = $"Failed to initialize LLM provider: {ex.Message}",
+                Reasoning = "LLM provider initialization failed"
+            };
+        }
+        return await client.QueryAsync(prompt, cancellationToken);
     }
 
     /// <summary>
     /// Returns the ILLMClient for the currently configured provider.
-    /// Lazily creates clients on first use.
+    /// Lazily creates clients on first use and caches them.
+    /// If the provider changes, the old client is disposed and a new one is created.
     /// </summary>
     public ILLMClient GetClient()
     {
         var config = _configManager.GetConfiguration();
-        var provider = config.Llm.Provider ?? "claude-cli";
+        var provider = config.Llm.Provider ?? "anthropic-api";
 
-        return provider.ToLowerInvariant() switch
+        lock (_lock)
         {
-            "copilot-cli" => GetCopilotClient(config.Llm),
-            _ => GetClaudeClient(config.Llm), // claude-cli is default
-        };
-    }
+            // Return cached client if provider hasn't changed
+            if (_cachedClient != null && string.Equals(_cachedProvider, provider, StringComparison.OrdinalIgnoreCase))
+                return _cachedClient;
 
-    private ILLMClient GetClaudeClient(LlmConfig llmConfig)
-    {
-        if (llmConfig.PersistentProcess)
-        {
-            lock (_lock)
+            // Dispose old client if switching providers
+            if (_cachedClient is IDisposable disposable)
             {
-                _persistentClaudeClient ??= new PersistentClaudeClient(
-                    llmConfig,
-                    _loggerFactory.CreateLogger<PersistentClaudeClient>());
-                return _persistentClaudeClient;
+                _logger.LogInformation("Switching LLM provider from {Old} to {New}", _cachedProvider, provider);
+                disposable.Dispose();
+                _cachedClient = null;
+                _cachedProvider = null;
             }
-        }
 
-        lock (_lock)
-        {
-            _claudeClient ??= new ClaudeCliClient(
-                llmConfig,
-                _loggerFactory.CreateLogger<ClaudeCliClient>(),
-                _configManager);
-            return _claudeClient;
+            if (!_factories.TryGetValue(provider, out var factory))
+            {
+                _logger.LogWarning("Unknown LLM provider '{Provider}', falling back to anthropic-api", provider);
+                factory = _factories["anthropic-api"];
+            }
+
+            _cachedClient = factory(config.Llm);
+            _cachedProvider = provider;
+            _logger.LogInformation("Initialized LLM provider: {Provider}", provider);
+            return _cachedClient;
         }
     }
 
-    private CopilotCliClient GetCopilotClient(LlmConfig llmConfig)
+    private HttpClient CreateHttpClient()
     {
-        lock (_lock)
-        {
-            _copilotClient ??= new CopilotCliClient(
-                llmConfig,
-                _loggerFactory.CreateLogger<CopilotCliClient>());
-            return _copilotClient;
-        }
+        if (_httpClientFactory != null)
+            return _httpClientFactory.CreateClient("LLMClient");
+
+        // Fallback for tests or when no factory is registered
+        return new HttpClient { Timeout = TimeSpan.FromMinutes(5) };
     }
 
     public void Dispose()
     {
         lock (_lock)
         {
-            (_persistentClaudeClient as IDisposable)?.Dispose();
-            _persistentClaudeClient = null;
-            _claudeClient = null;
-            _copilotClient = null;
+            if (_cachedClient is IDisposable disposable)
+                disposable.Dispose();
+            _cachedClient = null;
+            _cachedProvider = null;
         }
         GC.SuppressFinalize(this);
     }

@@ -213,12 +213,23 @@
             // Collect all event types and auto-enable them on first load
             knownEventTypes = new Set();
             events.forEach(function(evt) { if (evt.type) knownEventTypes.add(evt.type); });
-            activeEventFilters = new Set(knownEventTypes);
+
+            // Restore saved event filters if they intersect with known types
+            var savedFilters = loadFilter('cpa-session-event-filters', null);
+            if (savedFilters && Array.isArray(savedFilters)) {
+                var restored = savedFilters.filter(function(t) { return knownEventTypes.has(t); });
+                activeEventFilters = restored.length > 0 ? new Set(restored) : new Set(knownEventTypes);
+            } else {
+                activeEventFilters = new Set(knownEventTypes);
+            }
             renderTimelineFilters();
 
             timeline.innerHTML = events.map(function(evt) {
                 return buildTimelineItemHtml(evt);
             }).join('');
+
+            // Apply saved filters to hide non-matching items
+            applyTimelineFilters();
         }
 
         function renderTimelineFilters() {
@@ -236,6 +247,7 @@
             else activeEventFilters.add(type);
             applyTimelineFilters();
             renderTimelineFilters();
+            saveFilter('cpa-session-event-filters', Array.from(activeEventFilters));
         }
 
         function toggleAllTimelineFilters() {
@@ -246,6 +258,7 @@
             }
             applyTimelineFilters();
             renderTimelineFilters();
+            saveFilter('cpa-session-event-filters', Array.from(activeEventFilters));
         }
 
         function applyTimelineFilters() {
@@ -359,14 +372,26 @@
 
         // --- Event handlers ---
         document.addEventListener('DOMContentLoaded', function() {
+            // Restore checkbox states
+            var chkAutoScroll = document.getElementById('chkAutoScroll');
+            if (chkAutoScroll) chkAutoScroll.checked = loadFilter('cpa-session-autoscroll', true);
+
             var chkLive = document.getElementById('chkLiveSession');
             if (chkLive) {
+                chkLive.checked = loadFilter('cpa-session-live', true);
                 chkLive.addEventListener('change', function() {
+                    saveFilter('cpa-session-live', this.checked);
                     if (this.checked && currentSessionId) {
                         startLiveRefresh(currentSessionId);
                     } else {
                         stopLiveRefresh();
                     }
+                });
+            }
+
+            if (chkAutoScroll) {
+                chkAutoScroll.addEventListener('change', function() {
+                    saveFilter('cpa-session-autoscroll', this.checked);
                 });
             }
 

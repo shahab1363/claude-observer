@@ -178,9 +178,15 @@ const Shortcuts = {
                     e.preventDefault();
                     window.location.href = '/config.html';
                     break;
+                case 't':
+                    e.preventDefault();
+                    TerminalPanel.toggle();
+                    break;
                 case 'Escape':
                     if (this.modal && this.modal.classList.contains('active')) {
                         this.toggleModal();
+                    } else if (document.getElementById('terminalPanel')?.classList.contains('open')) {
+                        TerminalPanel.close();
                     }
                     break;
             }
@@ -327,12 +333,254 @@ const SimpleMarkdown = {
     }
 };
 
+// ---- Terminal Panel (sticky bottom) ----
+const TerminalPanel = {
+    STORAGE_KEY: 'cpa-terminal-open',
+    HEIGHT_KEY: 'cpa-terminal-height',
+    MAX_LINES: 1000,
+    MIN_HEIGHT: 120,
+    MAX_HEIGHT_RATIO: 0.6,
+    panel: null,
+    outputEl: null,
+    eventSource: null,
+    autoScroll: true,
+    resizing: false,
+
+    init() {
+        // Inject bottom panel DOM
+        const panel = document.createElement('div');
+        panel.className = 'terminal-panel';
+        panel.id = 'terminalPanel';
+        panel.innerHTML = `
+            <div class="terminal-resize-handle" id="terminalResizeHandle"></div>
+            <div class="terminal-header" id="terminalHeader">
+                <h3>&#9002; Terminal</h3>
+                <div class="terminal-header-actions">
+                    <label><input type="checkbox" id="terminalAutoScroll" checked> Auto-scroll</label>
+                    <button class="terminal-btn-sm" id="terminalClear">Clear</button>
+                    <button class="terminal-close" id="terminalClose" aria-label="Close terminal">&times;</button>
+                </div>
+            </div>
+            <div class="terminal-output" id="terminalOutput">
+                <div class="terminal-empty">No subprocess output yet</div>
+            </div>
+        `;
+        document.body.appendChild(panel);
+        this.panel = panel;
+        this.outputEl = panel.querySelector('#terminalOutput');
+
+        // Inject toggle button into nav
+        const nav = document.querySelector('nav .nav-links, nav');
+        if (nav) {
+            const btn = document.createElement('button');
+            btn.className = 'terminal-toggle-btn';
+            btn.id = 'terminalToggle';
+            btn.textContent = 'Terminal';
+            btn.setAttribute('aria-label', 'Toggle terminal panel');
+            btn.addEventListener('click', () => this.toggle());
+            nav.appendChild(btn);
+        }
+
+        // Wire up actions
+        panel.querySelector('#terminalClose').addEventListener('click', () => this.close());
+        panel.querySelector('#terminalClear').addEventListener('click', () => this.clear());
+        panel.querySelector('#terminalAutoScroll').addEventListener('change', (e) => {
+            this.autoScroll = e.target.checked;
+        });
+
+        // Resize via drag handle or header
+        this._initResize(panel.querySelector('#terminalResizeHandle'));
+        this._initResize(panel.querySelector('#terminalHeader'));
+
+        // Restore saved height
+        const savedHeight = parseInt(localStorage.getItem(this.HEIGHT_KEY));
+        if (savedHeight && savedHeight >= this.MIN_HEIGHT) {
+            panel.style.setProperty('--terminal-height', savedHeight + 'px');
+            this._applyHeight(savedHeight);
+        }
+
+        // Restore open/closed state
+        if (localStorage.getItem(this.STORAGE_KEY) === 'true') {
+            this.open();
+        }
+
+        // Always connect SSE so buffer fills even when panel is closed
+        this.connect();
+    },
+
+    _initResize(handle) {
+        if (!handle) return;
+        let startY, startH;
+
+        const onMouseMove = (e) => {
+            if (!this.resizing) return;
+            const delta = startY - e.clientY;
+            const newH = Math.max(this.MIN_HEIGHT, Math.min(window.innerHeight * this.MAX_HEIGHT_RATIO, startH + delta));
+            this._applyHeight(newH);
+        };
+
+        const onMouseUp = () => {
+            if (!this.resizing) return;
+            this.resizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            document.removeEventListener('mousemove', onMouseMove);
+            document.removeEventListener('mouseup', onMouseUp);
+            // Save height
+            const h = this.panel.offsetHeight;
+            localStorage.setItem(this.HEIGHT_KEY, h);
+        };
+
+        handle.addEventListener('mousedown', (e) => {
+            if (!this.panel.classList.contains('open')) return;
+            this.resizing = true;
+            startY = e.clientY;
+            startH = this.panel.offsetHeight;
+            document.body.style.cursor = 'ns-resize';
+            document.body.style.userSelect = 'none';
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('mouseup', onMouseUp);
+            e.preventDefault();
+        });
+    },
+
+    _applyHeight(h) {
+        this.panel.style.height = h + 'px';
+        document.body.style.paddingBottom = h + 'px';
+    },
+
+    toggle() {
+        if (this.panel.classList.contains('open')) {
+            this.close();
+        } else {
+            this.open();
+        }
+    },
+
+    open() {
+        this.panel.classList.add('open');
+        document.body.classList.add('terminal-open');
+        // Apply saved height or default
+        const savedH = parseInt(localStorage.getItem(this.HEIGHT_KEY)) || 240;
+        this._applyHeight(savedH);
+        localStorage.setItem(this.STORAGE_KEY, 'true');
+        const btn = document.getElementById('terminalToggle');
+        if (btn) btn.classList.add('active');
+        if (this.autoScroll) this.scrollToBottom();
+    },
+
+    close() {
+        this.panel.classList.remove('open');
+        this.panel.style.height = '0';
+        document.body.classList.remove('terminal-open');
+        document.body.style.paddingBottom = '';
+        localStorage.setItem(this.STORAGE_KEY, 'false');
+        const btn = document.getElementById('terminalToggle');
+        if (btn) btn.classList.remove('active');
+    },
+
+    connect() {
+        // Fetch existing buffer first
+        fetch('/api/terminal/buffer')
+            .then(r => r.json())
+            .then(lines => {
+                if (lines && lines.length > 0) {
+                    const empty = this.outputEl.querySelector('.terminal-empty');
+                    if (empty) empty.remove();
+                    lines.forEach(line => this.appendLine(line));
+                }
+            })
+            .catch(() => { /* ignore buffer fetch errors */ });
+
+        // Connect SSE for live updates
+        this.eventSource = new EventSource('/api/terminal/stream');
+        this.eventSource.onmessage = (event) => {
+            try {
+                const line = JSON.parse(event.data);
+                this.appendLine(line);
+            } catch { /* ignore parse errors */ }
+        };
+        this.eventSource.onerror = () => {
+            if (this.eventSource) {
+                this.eventSource.close();
+                this.eventSource = null;
+            }
+            setTimeout(() => this.connect(), 3000);
+        };
+    },
+
+    disconnect() {
+        if (this.eventSource) {
+            this.eventSource.close();
+            this.eventSource = null;
+        }
+    },
+
+    appendLine(line) {
+        const empty = this.outputEl.querySelector('.terminal-empty');
+        if (empty) empty.remove();
+
+        const div = document.createElement('div');
+        div.className = `terminal-line terminal-level-${this.escapeAttr(line.level || 'stdout')}`;
+
+        const ts = new Date(line.timestamp);
+        const timeStr = ts.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+        const sourceClass = 'terminal-source-' + (line.source || '').replace(/[^a-z0-9-]/g, '');
+        div.innerHTML =
+            `<span class="terminal-ts">${this.escapeHtml(timeStr)}</span>` +
+            `<span class="terminal-source ${sourceClass}">${this.escapeHtml(line.source || '')}</span>` +
+            `<span class="terminal-text">${this.escapeHtml(line.text || '')}</span>`;
+
+        this.outputEl.appendChild(div);
+
+        while (this.outputEl.children.length > this.MAX_LINES) {
+            this.outputEl.removeChild(this.outputEl.firstChild);
+        }
+
+        if (this.autoScroll) this.scrollToBottom();
+    },
+
+    scrollToBottom() {
+        if (this.outputEl) {
+            this.outputEl.scrollTop = this.outputEl.scrollHeight;
+        }
+    },
+
+    clear() {
+        fetch('/api/terminal/clear', { method: 'POST' })
+            .then(() => {
+                this.outputEl.innerHTML = '<div class="terminal-empty">No subprocess output yet</div>';
+            })
+            .catch(() => Toast.show('Error', 'Failed to clear terminal', 'danger'));
+    },
+
+    escapeHtml(str) {
+        const d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
+    },
+
+    escapeAttr(str) {
+        return String(str).replace(/[^a-z0-9-]/gi, '');
+    }
+};
+
+// ---- Filter Persistence (localStorage) ----
+function saveFilter(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+function loadFilter(key, fallback) {
+    const v = localStorage.getItem(key);
+    if (v === null) return fallback;
+    try { return JSON.parse(v); } catch { return fallback; }
+}
+
 // ---- Initialize on DOM load ----
 document.addEventListener('DOMContentLoaded', () => {
     Theme.init();
     Toast.init();
     ConnectionStatus.init();
     Shortcuts.init();
+    TerminalPanel.init();
 
     const themeBtn = document.getElementById('themeToggle');
     if (themeBtn) {

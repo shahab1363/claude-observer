@@ -10,7 +10,6 @@ public class LLMClientTests
     public async Task ParseLLMResponse_ShouldExtractSafetyScore()
     {
         // Arrange
-        var client = new ClaudeCliClient(new LlmConfig());
         var response = """
         Here's my analysis:
 
@@ -22,7 +21,7 @@ public class LLMClientTests
         """;
 
         // Act
-        var result = client.ParseResponse(response);
+        var result = ClaudeCliClient.ParseResponse(response);
 
         // Assert
         Assert.Equal(95, result.SafetyScore);
@@ -34,11 +33,10 @@ public class LLMClientTests
     public void ParseLLMResponse_ShouldHandleInvalidJson()
     {
         // Arrange
-        var client = new ClaudeCliClient(new LlmConfig());
         var response = "This is not valid JSON";
 
         // Act
-        var result = client.ParseResponse(response);
+        var result = ClaudeCliClient.ParseResponse(response);
 
         // Assert
         Assert.Equal(0, result.SafetyScore);

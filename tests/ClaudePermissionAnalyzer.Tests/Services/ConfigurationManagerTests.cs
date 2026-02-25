@@ -18,7 +18,7 @@ public class ConfigurationManagerTests
 
         // Assert
         Assert.NotNull(config);
-        Assert.Equal("claude-cli", config.Llm.Provider);
+        Assert.Equal("anthropic-api", config.Llm.Provider);
         Assert.Equal(5050, config.Server.Port);
 
         // Cleanup

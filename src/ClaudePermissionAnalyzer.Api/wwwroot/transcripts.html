@@ -194,6 +194,17 @@
         let currentSessionId = null;
         let sseSource = null;
 
+        var collapseIdCounter = 0;
+        function nextCollapseId() { return 'c' + (collapseIdCounter++); }
+        function toggleCollapse(id) {
+            var content = document.getElementById('collapse-' + id);
+            var toggle = document.getElementById('toggle-' + id);
+            if (!content || !toggle) return;
+            var isCollapsed = content.classList.contains('collapsed');
+            content.classList.toggle('collapsed', !isCollapsed);
+            toggle.textContent = isCollapsed ? '[-]' : '[+]';
+        }
+
         function escapeHtml(str) {
             if (!str) return '';
             return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -286,7 +297,15 @@
 
                 knownTypes = new Set();
                 currentEntries.forEach(function(e) { if (e.type) knownTypes.add(e.type); });
-                activeFilters = new Set(knownTypes);
+
+                // Restore saved type filters if they intersect with known types
+                var savedFilters = loadFilter('cpa-transcript-type-filters', null);
+                if (savedFilters && Array.isArray(savedFilters)) {
+                    var restored = savedFilters.filter(function(t) { return knownTypes.has(t); });
+                    activeFilters = restored.length > 0 ? new Set(restored) : new Set(knownTypes);
+                } else {
+                    activeFilters = new Set(knownTypes);
+                }
 
                 toolUseIndex = buildToolUseIndex();
                 renderFilterChips();
@@ -370,6 +389,7 @@
                 c.classList.toggle('active', activeFilters.has(c.dataset.type));
             });
             renderTranscript();
+            saveFilter('cpa-transcript-type-filters', Array.from(activeFilters));
         }
 
         function toggleAllFilters() {
@@ -382,10 +402,12 @@
                 c.classList.toggle('active', activeFilters.has(c.dataset.type));
             });
             renderTranscript();
+            saveFilter('cpa-transcript-type-filters', Array.from(activeFilters));
         }
 
         // --- Rendering ---
         function renderTranscript() {
+            collapseIdCounter = 0;
             var container = document.getElementById('transcriptContent');
             var filtered = currentEntries.filter(function(e) { return e.type && activeFilters.has(e.type); });
             updateEntryCount();
@@ -428,6 +450,16 @@
             return false;
         }
 
+        function hasSpecialBlocks(entry) {
+            if (!entry.message || typeof entry.message !== 'object') return false;
+            var content = entry.message.content;
+            if (!Array.isArray(content)) return false;
+            for (var i = 0; i < content.length; i++) {
+                if (content[i] && (content[i].type === 'tool_use' || content[i].type === 'tool_result' || content[i].type === 'thinking')) return true;
+            }
+            return false;
+        }
+
         // Build index of tool_use_id -> tool_use content block for linking results to requests
         function buildToolUseIndex() {
             var index = {};
@@ -451,46 +483,189 @@
             return toolUseIndex[toolResult.tool_use_id] || null;
         }
 
+        // --- claude-trace inspired: tool display name ---
+        function getToolDisplayName(c) {
+            var name = c.name || 'unknown';
+            var input = c.input || {};
+            var n = name.toLowerCase();
+            if (n === 'bash' || n === 'execute') {
+                var cmd = input.command || '';
+                if (cmd.length > 80) cmd = cmd.substring(0, 80) + '...';
+                return name + '(' + cmd + ')';
+            }
+            if (n === 'read') return name + '(' + (input.file_path || '') + ')';
+            if (n === 'write') return name + '(' + (input.file_path || '') + ')';
+            if (n === 'edit') {
+                var fp = input.file_path || '';
+                var fileName = fp.split('/').pop() || fp.split('\\').pop() || fp;
+                return name + '(' + fileName + ')';
+            }
+            if (n === 'multiedit') {
+                var fp2 = input.file_path || '';
+                var fn2 = fp2.split('/').pop() || fp2.split('\\').pop() || fp2;
+                return name + '(' + fn2 + ', ' + (input.edits || []).length + ' edits)';
+            }
+            if (n === 'grep') return name + '(' + (input.pattern || '') + ')';
+            if (n === 'glob') return name + '(' + (input.pattern || '') + ')';
+            if (n === 'websearch') return name + '(' + (input.query || '') + ')';
+            if (n === 'webfetch') return name + '(' + (input.url || '').substring(0, 60) + ')';
+            if (n === 'task') return name + '(' + (input.description || '').substring(0, 60) + ')';
+            return name;
+        }
+
+        // --- claude-trace inspired: inline diff ---
+        function renderInlineDiff(oldStr, newStr) {
+            var oldLines = (oldStr || '').split('\n');
+            var newLines = (newStr || '').split('\n');
+            var html = '<div class="diff-container">';
+            for (var i = 0; i < oldLines.length; i++) {
+                html += '<div class="diff-line diff-removed">- ' + escapeHtml(oldLines[i]) + '</div>';
+            }
+            for (var j = 0; j < newLines.length; j++) {
+                html += '<div class="diff-line diff-added">+ ' + escapeHtml(newLines[j]) + '</div>';
+            }
+            html += '</div>';
+            return html;
+        }
+
+        // --- claude-trace inspired: enhanced tool_use rendering ---
+        function renderToolUseEnhanced(c) {
+            var name = (c.name || '').toLowerCase();
+            var input = c.input || {};
+            var badge = '<span class="tool-name-badge">' + escapeHtml(c.name || 'unknown') + '</span>';
+            var specialContent = '';
+
+            if (name === 'bash' || name === 'execute') {
+                specialContent = '<div class="bash-command">' + escapeHtml(input.command || '') + '</div>';
+                if (input.description) {
+                    specialContent += '<div style="font-size:0.82em;color:var(--text-muted);margin-top:4px;">' + escapeHtml(input.description) + '</div>';
+                }
+            } else if (name === 'edit') {
+                specialContent = '<div class="file-path-display">' + escapeHtml(input.file_path || '') + '</div>';
+                if (input.old_string != null && input.new_string != null) {
+                    specialContent += renderInlineDiff(input.old_string, input.new_string);
+                }
+            } else if (name === 'multiedit') {
+                specialContent = '<div class="file-path-display">' + escapeHtml(input.file_path || '') + '</div>';
+                var edits = input.edits || [];
+                for (var i = 0; i < edits.length; i++) {
+                    specialContent += '<div style="margin-top:8px;font-size:0.8em;color:var(--text-muted);font-weight:600;">Edit ' + (i + 1) + ':</div>';
+                    specialContent += renderInlineDiff(edits[i].old_string, edits[i].new_string);
+                }
+            } else if (name === 'write') {
+                specialContent = '<div class="file-path-display">' + escapeHtml(input.file_path || '') + '</div>';
+                if (input.content) {
+                    var lines = input.content.split('\n');
+                    var previewLines = lines.slice(0, 10);
+                    specialContent += '<div class="write-preview">' + escapeHtml(previewLines.join('\n'));
+                    if (lines.length > 10) {
+                        specialContent += '<div class="truncation-notice">... ' + (lines.length - 10) + ' more lines</div>';
+                    }
+                    specialContent += '</div>';
+                }
+            } else if (name === 'read') {
+                specialContent = '<div class="file-path-display">' + escapeHtml(input.file_path || '') + '</div>';
+            } else if (name === 'grep') {
+                specialContent = '<div style="font-family:var(--font-mono);font-size:0.85em;">';
+                if (input.pattern) specialContent += '<span style="color:var(--text-primary);">pattern:</span> ' + escapeHtml(input.pattern) + '<br>';
+                if (input.path) specialContent += '<span style="color:var(--text-primary);">path:</span> ' + escapeHtml(input.path) + '<br>';
+                if (input.glob) specialContent += '<span style="color:var(--text-primary);">glob:</span> ' + escapeHtml(input.glob);
+                specialContent += '</div>';
+            } else if (name === 'glob') {
+                specialContent = '<div style="font-family:var(--font-mono);font-size:0.85em;">' + escapeHtml(input.pattern || '');
+                if (input.path) specialContent += ' in ' + escapeHtml(input.path);
+                specialContent += '</div>';
+            } else {
+                // Generic: show all fields in monospace block
+                var details = formatToolUse(c);
+                var detailLines = details.split('\n');
+                if (detailLines.length > 0 && detailLines[0].indexOf('Tool: ') === 0) detailLines.shift();
+                specialContent = '<div class="tool-use-block">' + escapeHtml(detailLines.join('\n')) + '</div>';
+            }
+
+            return '<div class="tool-block">' + badge +
+                '<span class="tool-display-name"><span class="tool-param">' + escapeHtml(getToolDisplayName(c)) + '</span></span>' +
+                specialContent + '</div>';
+        }
+
+        // --- claude-trace inspired: collapsible tool result ---
+        function renderToolResultEnhanced(c, originatingToolUse) {
+            var cid = nextCollapseId();
+            var isError = c.is_error;
+            var statusIcon = isError ? 'ERR' : 'OK';
+            var statusStyle = isError ? 'color:var(--color-danger)' : 'color:var(--color-success)';
+
+            var toolHeader = '';
+            if (originatingToolUse) {
+                toolHeader = '<span class="tool-name-badge">' + escapeHtml(originatingToolUse.name || 'unknown') + '</span>' +
+                    '<span class="tool-display-name"><span class="tool-param">' + escapeHtml(getToolDisplayName(originatingToolUse)) + '</span></span>';
+            }
+
+            var resultText = formatToolResult(c);
+            var truncResult = resultText.length > 2000;
+            var displayResult = truncResult ? resultText.substring(0, 2000) + '\n... [truncated, ' + resultText.length + ' chars total]' : resultText;
+
+            return '<div class="tool-block">' + toolHeader +
+                '<div class="collapse-toggle" onclick="toggleCollapse(\'' + cid + '\')" style="margin-top:4px;">' +
+                    '<span class="toggle-indicator" id="toggle-' + cid + '">[+]</span>' +
+                    '<span style="font-size:0.82em;color:var(--text-muted);">Result <span style="' + statusStyle + ';font-weight:600;">' + statusIcon + '</span></span>' +
+                '</div>' +
+                '<div id="collapse-' + cid + '" class="collapse-content collapsed">' +
+                    '<div class="tool-result-block" style="max-height:none;">' + escapeHtml(displayResult) + '</div>' +
+                '</div>' +
+                '</div>';
+        }
+
         function buildToolBlocksHtml(entry, idx) {
             var content = entry.message.content;
             var parts = [];
+            var useMarkdown = document.getElementById('chkMarkdown') && document.getElementById('chkMarkdown').checked;
             for (var i = 0; i < content.length; i++) {
                 var c = content[i];
                 if (typeof c === 'string') {
                     if (c.trim()) parts.push('<div class="entry-content">' + escapeHtml(c) + '</div>');
+                } else if (c && c.type === 'thinking') {
+                    var thinkingText = c.thinking || c.text || '';
+                    var rendered = useMarkdown && typeof SimpleMarkdown !== 'undefined'
+                        ? SimpleMarkdown.render(thinkingText)
+                        : escapeHtml(thinkingText);
+                    parts.push('<div class="thinking-block"><div class="thinking-label">Thinking</div>' +
+                        '<div' + (useMarkdown ? ' class="md-rendered"' : '') + '>' + rendered + '</div></div>');
                 } else if (c && c.type === 'tool_use') {
-                    var toolName = c.name || 'unknown';
-                    var badge = '<span class="tool-name-badge">' + escapeHtml(toolName) + '</span>';
-                    var details = formatToolUse(c);
-                    // Remove the first "Tool: name" line since we show it as a badge
-                    var detailLines = details.split('\n');
-                    if (detailLines.length > 0 && detailLines[0].indexOf('Tool: ') === 0) detailLines.shift();
-                    var detailText = detailLines.join('\n');
-                    parts.push(badge + '<div class="tool-use-block">' + escapeHtml(detailText) + '</div>');
+                    parts.push(renderToolUseEnhanced(c));
                 } else if (c && c.type === 'tool_result') {
-                    // Look up the originating tool_use request
                     var originatingToolUse = findToolUseForResult(c);
-                    var requestHeader = '';
-                    if (originatingToolUse) {
-                        var toolName = originatingToolUse.name || 'unknown';
-                        var requestDetails = formatToolUse(originatingToolUse);
-                        var requestLines = requestDetails.split('\n');
-                        if (requestLines.length > 0 && requestLines[0].indexOf('Tool: ') === 0) requestLines.shift();
-                        requestHeader = '<span class="tool-name-badge">' + escapeHtml(toolName) + '</span>' +
-                            '<div class="tool-use-block" style="margin-bottom:6px;opacity:0.8;border-left:2px solid var(--accent-primary,#2563eb);padding-left:10px;">' +
-                            escapeHtml(requestLines.join('\n')) + '</div>';
-                    }
-                    var resultText = formatToolResult(c);
-                    var truncResult = resultText.length > 1500;
-                    var displayResult = truncResult ? resultText.substring(0, 1500) + '\n... [truncated]' : resultText;
-                    parts.push(requestHeader + '<div class="tool-result-block">' + escapeHtml(displayResult) + '</div>');
+                    parts.push(renderToolResultEnhanced(c, originatingToolUse));
                 } else if (c && c.text) {
-                    parts.push('<div class="entry-content">' + escapeHtml(c.text) + '</div>');
+                    if (useMarkdown && typeof SimpleMarkdown !== 'undefined') {
+                        parts.push('<div class="entry-content md-rendered">' + SimpleMarkdown.render(c.text) + '</div>');
+                    } else {
+                        parts.push('<div class="entry-content">' + escapeHtml(c.text) + '</div>');
+                    }
                 } else if (c && c.type === 'image') {
                     parts.push('<div class="entry-content">[Image]</div>');
                 }
             }
             return parts.join('\n');
+        }
+
+        // --- claude-trace inspired: role-based coloring ---
+        function getRoleClass(type, role) {
+            if (type === 'user' || role === 'user') return 'role-user';
+            if (type === 'assistant' || role === 'assistant') return 'role-assistant';
+            if (type === 'tool_result') return 'role-tool';
+            if (type === 'system' || type === 'file-history-snapshot') return 'role-system';
+            if (type === 'progress' || type === 'hook_progress') return 'role-tool';
+            return '';
+        }
+
+        function getRoleBadgeClass(type, role) {
+            if (type === 'user' || role === 'user') return 'badge-user';
+            if (type === 'assistant' || role === 'assistant') return 'badge-assistant';
+            if (type === 'tool_result') return 'badge-tool';
+            if (type === 'system' || type === 'file-history-snapshot') return 'badge-system';
+            if (type === 'progress' || type === 'hook_progress') return 'badge-tool';
+            return '';
         }
 
         function buildEntryHtml(entry, idx) {
@@ -500,7 +675,6 @@
             var useMarkdown = document.getElementById('chkMarkdown') && document.getElementById('chkMarkdown').checked;
 
             // Detect tool_result messages masquerading as "user" type
-            // In Claude's API, tool results are sent as role:"user" but they're not user input
             if (type === 'user' && entry.message && Array.isArray(entry.message.content)) {
                 var hasToolResult = entry.message.content.some(function(c) { return c && c.type === 'tool_result'; });
                 if (hasToolResult) {
@@ -508,12 +682,14 @@
                     role = 'tool output';
                 }
             }
-            var typeClass = getTypeClass(type);
+
+            var roleClass = getRoleClass(type, role);
+            var badgeClass = getRoleBadgeClass(type, role);
 
             var contentHtml = '';
 
-            // If this entry contains tool_use or tool_result blocks, render them with special styling
-            if (hasToolBlocks(entry)) {
+            // If entry contains tool_use, tool_result, or thinking blocks, use enhanced rendering
+            if (hasSpecialBlocks(entry)) {
                 contentHtml = '<div class="entry-content" id="content-' + idx + '">' + buildToolBlocksHtml(entry, idx) + '</div>';
             } else {
                 var content = extractContent(entry);
@@ -532,9 +708,9 @@
                 }
             }
 
-            return '<div class="transcript-entry ' + typeClass + '">' +
+            return '<div class="transcript-entry ' + roleClass + '">' +
                 '<div class="entry-header">' +
-                '<span><span class="entry-type">' + escapeHtml(type) + '</span>' + (role ? ' <strong>' + escapeHtml(role) + '</strong>' : '') + '</span>' +
+                '<span><span class="entry-type role-badge ' + badgeClass + '">' + escapeHtml(type) + '</span>' + (role ? ' <strong>' + escapeHtml(role) + '</strong>' : '') + '</span>' +
                 '<span>' + time + '</span>' +
                 '</div>' +
                 contentHtml +
@@ -544,15 +720,6 @@
         function updateEntryCount() {
             var filtered = currentEntries.filter(function(e) { return e.type && activeFilters.has(e.type); });
             document.getElementById('entryCount').textContent = 'Showing ' + filtered.length + ' of ' + currentEntries.length + ' entries';
-        }
-
-        function getTypeClass(type) {
-            if (type === 'user') return 'type-user';
-            if (type === 'assistant') return 'type-assistant';
-            if (type === 'tool_result') return 'type-tool-result';
-            if (type === 'progress' || type === 'hook_progress') return 'type-progress';
-            if (type === 'system' || type === 'file-history-snapshot') return 'type-system';
-            return '';
         }
 
         function formatToolUse(c) {
@@ -682,6 +849,7 @@
                     if (Array.isArray(msg.content)) {
                         return msg.content.map(function(c) {
                             if (typeof c === 'string') return c;
+                            if (c && c.type === 'thinking') return '[Thinking]\n' + (c.thinking || c.text || '');
                             if (c && c.type === 'tool_use') return formatToolUse(c);
                             if (c && c.type === 'tool_result') return formatToolResult(c);
                             if (c && c.text) return c.text;
@@ -807,6 +975,16 @@
 
         // --- Event handlers ---
         document.addEventListener('DOMContentLoaded', function() {
+            // Restore checkbox states
+            var chkAutoScroll = document.getElementById('chkAutoScroll');
+            if (chkAutoScroll) chkAutoScroll.checked = loadFilter('cpa-transcript-autoscroll', true);
+
+            var chkMarkdown = document.getElementById('chkMarkdown');
+            if (chkMarkdown) chkMarkdown.checked = loadFilter('cpa-transcript-markdown', false);
+
+            var chkLive = document.getElementById('chkLive');
+            if (chkLive) chkLive.checked = loadFilter('cpa-transcript-live', true);
+
             loadProjects();
 
             // If ?session= param provided (e.g. from sessions page link), find the project and open transcript
@@ -815,12 +993,20 @@
                 openSessionFromUrl(urlSession);
             }
 
-            document.getElementById('chkMarkdown').addEventListener('change', function() {
+            if (chkAutoScroll) {
+                chkAutoScroll.addEventListener('change', function() {
+                    saveFilter('cpa-transcript-autoscroll', this.checked);
+                });
+            }
+
+            chkMarkdown.addEventListener('change', function() {
+                saveFilter('cpa-transcript-markdown', this.checked);
                 renderTranscript();
                 autoScrollToBottom();
             });
 
-            document.getElementById('chkLive').addEventListener('change', function() {
+            chkLive.addEventListener('change', function() {
+                saveFilter('cpa-transcript-live', this.checked);
                 if (this.checked && currentSessionId) {
                     startSse(currentSessionId);
                 } else {

@@ -7,18 +7,19 @@ using System.Text.RegularExpressions;
 
 namespace ClaudePermissionAnalyzer.Api.Services;
 
-public class ClaudeCliClient : ILLMClient
+public class ClaudeCliClient : LLMClientBase, ILLMClient
 {
     private readonly LlmConfig _config;
     private readonly ConfigurationManager? _configManager;
     private readonly ILogger<ClaudeCliClient>? _logger;
 
-    private const int MaxTimeoutMs = 300_000; // 5 minutes
     private const int DefaultTimeoutMs = 15_000;
-    private const int MaxOutputSize = 1_048_576; // 1MB max output from CLI
+    private const int MaxRetries = 3;
     private static readonly TimeSpan ModelNameRegexTimeout = TimeSpan.FromMilliseconds(100);
 
-    public ClaudeCliClient(LlmConfig config, ILogger<ClaudeCliClient>? logger = null, ConfigurationManager? configManager = null)
+    public ClaudeCliClient(LlmConfig config, ILogger<ClaudeCliClient>? logger = null,
+        ConfigurationManager? configManager = null, TerminalOutputService? terminalOutput = null)
+        : base(configManager, config, terminalOutput)
     {
         _config = config ?? throw new ArgumentNullException(nameof(config));
         _logger = logger;
@@ -31,71 +32,75 @@ public class ClaudeCliClient : ILLMClient
         }
     }
 
-    /// <summary>Gets the current timeout from live config, falling back to initial config.</summary>
-    private int CurrentTimeout
-    {
-        get
-        {
-            var timeout = _configManager?.GetConfiguration()?.Llm?.Timeout ?? _config.Timeout;
-            return Math.Clamp(timeout, 1000, MaxTimeoutMs);
-        }
-    }
-
     public async Task<LLMResponse> QueryAsync(string prompt, CancellationToken cancellationToken = default)
     {
         var timeout = CurrentTimeout;
-        var sw = System.Diagnostics.Stopwatch.StartNew();
-        try
+        var promptPreview = PreviewPrompt(prompt);
+        TerminalOutput?.Push("claude-cli", "info",
+            $"Querying LLM ({prompt.Length} chars, timeout: {timeout}ms): {promptPreview}");
+        var totalSw = Stopwatch.StartNew();
+
+        for (int attempt = 1; attempt <= MaxRetries; attempt++)
         {
-            var args = BuildCommandArgs(prompt);
-            var output = await ExecuteCommandAsync("claude", args, timeout, cancellationToken).ConfigureAwait(false);
-            sw.Stop();
-            var response = ParseResponse(output);
-            response.ElapsedMs = sw.ElapsedMilliseconds;
-            _logger?.LogInformation("LLM query completed in {Elapsed}ms (timeout={Timeout}ms)", sw.ElapsedMilliseconds, timeout);
-            return response;
-        }
-        catch (TimeoutException ex)
-        {
-            sw.Stop();
-            return new LLMResponse
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var sw = Stopwatch.StartNew();
+            try
             {
-                Success = false,
-                Error = $"LLM query timed out after {timeout}ms: {ex.Message}",
-                SafetyScore = 0,
-                Reasoning = $"LLM query timed out after {timeout}ms",
-                ElapsedMs = sw.ElapsedMilliseconds
-            };
-        }
-        catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 2)
-        {
-            return new LLMResponse
+                var args = BuildCommandArgs(prompt);
+                var cmd = _configManager?.GetConfiguration()?.Llm?.Command;
+                if (string.IsNullOrWhiteSpace(cmd)) cmd = "claude";
+                var output = await ExecuteCommandAsync(cmd, args, timeout, cancellationToken).ConfigureAwait(false);
+                sw.Stop();
+                var response = ParseResponse(output);
+                response.ElapsedMs = sw.ElapsedMilliseconds;
+                _logger?.LogInformation("LLM query completed in {Elapsed}ms (timeout={Timeout}ms)", sw.ElapsedMilliseconds, timeout);
+                TerminalOutput?.Push("claude-cli", "info", $"LLM query completed in {sw.ElapsedMilliseconds}ms");
+                return response;
+            }
+            catch (TimeoutException) when (attempt < MaxRetries)
             {
-                Success = false,
-                Error = "Claude CLI not found - ensure 'claude' command is installed and in PATH",
-                SafetyScore = 0,
-                Reasoning = "Claude CLI is not installed or not in PATH"
-            };
-        }
-        catch (InvalidOperationException ex)
-        {
-            _logger?.LogError(ex, "LLM query failed with invalid operation");
-            return new LLMResponse
+                sw.Stop();
+                TerminalOutput?.Push("claude-cli", "stderr",
+                    $"Attempt {attempt}/{MaxRetries} timed out after {timeout}ms -- retrying...");
+                _logger?.LogWarning("LLM query attempt {Attempt}/{MaxRetries} timed out after {Timeout}ms",
+                    attempt, MaxRetries, timeout);
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
             {
-                Success = false,
-                Error = "LLM query failed",
-                SafetyScore = 0,
-                Reasoning = "LLM query failed due to invalid operation"
-            };
+                totalSw.Stop();
+                TerminalOutput?.Push("claude-cli", "stderr",
+                    $"All {MaxRetries} attempts timed out ({totalSw.ElapsedMilliseconds}ms total)");
+                return CreateTimeoutResponse("LLM query", MaxRetries, timeout, totalSw.ElapsedMilliseconds);
+            }
+            catch (InvalidOperationException) when (attempt < MaxRetries)
+            {
+                sw.Stop();
+                TerminalOutput?.Push("claude-cli", "stderr",
+                    $"Attempt {attempt}/{MaxRetries} failed -- retrying...");
+                await Task.Delay(500, cancellationToken).ConfigureAwait(false);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 2)
+            {
+                return CreateFailureResponse(
+                    "Claude CLI not found - ensure 'claude' command is installed and in PATH",
+                    "Claude CLI is not installed or not in PATH");
+            }
+            catch (InvalidOperationException ex)
+            {
+                _logger?.LogError(ex, "LLM query failed after {MaxRetries} attempts", MaxRetries);
+                return CreateFailureResponse("LLM query failed", "LLM query failed due to invalid operation");
+            }
         }
-        // Let other exceptions propagate - they indicate programming errors or system failures
+
+        return CreateRetriesExhaustedResponse("LLM");
     }
 
-    public LLMResponse ParseResponse(string output)
+    public static LLMResponse ParseResponse(string output)
     {
         try
         {
-            // Enforce output size limit
             if (output.Length > MaxOutputSize)
             {
                 return CreateErrorResponse("LLM output exceeded maximum size limit");
@@ -221,6 +226,8 @@ public class ClaudeCliClient : ILLMClient
     private List<string> BuildCommandArgs(string prompt)
     {
         // Use ArgumentList for proper escaping - prevents command injection
+        // Note: isolation (no plugins, no hooks, no MCP) is handled by CLAUDE_CONFIG_DIR
+        // pointing to the isolated config dir
         var args = new List<string>
         {
             "-p",  // Print mode: output response and exit (non-interactive)
@@ -229,11 +236,6 @@ public class ClaudeCliClient : ILLMClient
             "--output-format",
             "text",
             "--no-session-persistence",  // Don't save to session history
-            "--tools",
-            "",  // Disable ALL tools for fast startup
-            "--strict-mcp-config",
-            "--mcp-config",
-            "{}",  // Disable all MCP servers
         };
 
         if (!string.IsNullOrWhiteSpace(_config.SystemPrompt))
@@ -248,9 +250,9 @@ public class ClaudeCliClient : ILLMClient
 
     /// <summary>
     /// Gets an isolated Claude config directory for the analyzer subprocess.
-    /// Has settings.json that disables all hooks and MCP servers for fast startup.
+    /// Has settings.json that disables all hooks, plugins, and MCP servers for fast startup.
     /// </summary>
-    private static string GetIsolatedConfigDir()
+    internal static string GetIsolatedConfigDir()
     {
         var dir = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
@@ -258,14 +260,59 @@ public class ClaudeCliClient : ILLMClient
             "claude-subprocess");
         var settingsPath = Path.Combine(dir, "settings.json");
 
-        if (!File.Exists(settingsPath))
-        {
-            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
-            // Empty settings — isolation is handled by CLI flags (--tools, --strict-mcp-config, --mcp-config)
-            File.WriteAllText(settingsPath, "{}");
-        }
+        if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+        // Always write settings to ensure plugins are disabled
+        File.WriteAllText(settingsPath,
+            """{"disableAllHooks":true,"enableAllProjectMcpServers":false,"enabledPlugins":{}}""");
 
         return dir;
+    }
+
+    /// <summary>
+    /// Reads the Anthropic API key from the main Claude config (~/.claude/config.json).
+    /// Returns null if not found.
+    /// </summary>
+    internal static string? ReadAnthropicApiKey()
+    {
+        try
+        {
+            var configPath = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".claude", "config.json");
+            if (!File.Exists(configPath)) return null;
+
+            var json = File.ReadAllText(configPath);
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.TryGetProperty("primaryApiKey", out var keyEl))
+                return keyEl.GetString();
+        }
+        catch { /* non-fatal */ }
+        return null;
+    }
+
+    /// <summary>
+    /// Configures environment variables for a Claude subprocess:
+    /// removes nesting-detection vars, sets isolated config dir, and provides the API key.
+    /// </summary>
+    internal static void ConfigureSubprocessEnvironment(ProcessStartInfo startInfo, string isolatedDir)
+    {
+        // Remove ALL Claude Code nesting-detection env vars
+        foreach (var key in new[] { "CLAUDECODE", "CLAUDE_CODE_ENTRYPOINT", "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS" })
+        {
+            startInfo.Environment.Remove(key);
+            startInfo.Environment[key] = null!;
+        }
+
+        // Point to isolated config dir (no plugins, no hooks)
+        startInfo.Environment["CLAUDE_CONFIG_DIR"] = isolatedDir;
+
+        // Provide API key from main config so subprocess can authenticate
+        var apiKey = ReadAnthropicApiKey();
+        if (!string.IsNullOrEmpty(apiKey))
+        {
+            startInfo.Environment["ANTHROPIC_API_KEY"] = apiKey;
+        }
     }
 
     private async Task<string> ExecuteCommandAsync(
@@ -274,110 +321,32 @@ public class ClaudeCliClient : ILLMClient
         int timeoutMs,
         CancellationToken cancellationToken)
     {
-        var startInfo = new ProcessStartInfo
-        {
-            FileName = command,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+        var startInfo = new ProcessStartInfo { FileName = command };
 
-        // Remove CLAUDECODE env var to allow claude CLI to run
-        // (it refuses to start inside another Claude Code session)
-        startInfo.Environment.Remove("CLAUDECODE");
-        startInfo.Environment["CLAUDECODE"] = null!;
-
-        // Use isolated config dir with no hooks/MCP servers for fast startup
+        // Configure subprocess environment: remove nesting vars, set isolated config, provide API key
         var isolatedDir = GetIsolatedConfigDir();
-        startInfo.Environment["CLAUDE_CONFIG_DIR"] = isolatedDir;
+        ConfigureSubprocessEnvironment(startInfo, isolatedDir);
 
-        // Use ArgumentList instead of Arguments for proper escaping
         foreach (var arg in args)
         {
             startInfo.ArgumentList.Add(arg);
         }
 
-        using var process = new Process
-        {
-            StartInfo = startInfo
-        };
+        // Log the full command line (redact prompt arg which is the last one)
+        var cmdLineArgs = args.Select((a, i) => i == args.Count - 1 ? $"\"{a[..Math.Min(80, a.Length)]}...\"" : $"\"{a}\"");
+        var cmdLine = $"{command} {string.Join(" ", cmdLineArgs)}";
+        TerminalOutput?.Push("claude-cli", "info", $"$ {cmdLine}");
+        var hasApiKey = !string.IsNullOrEmpty(startInfo.Environment["ANTHROPIC_API_KEY"]);
+        TerminalOutput?.Push("claude-cli", "info",
+            $"  env: CLAUDE_CONFIG_DIR={isolatedDir}, ANTHROPIC_API_KEY={( hasApiKey ? "set" : "MISSING" )}");
 
-        var output = new StringBuilder(512);
-        var error = new StringBuilder(256);
-        var outputTruncated = false;
+        TerminalOutput?.Push("claude-cli", "info", "Waiting for response...");
 
-        process.OutputDataReceived += (_, e) =>
-        {
-            if (e.Data != null && !outputTruncated)
-            {
-                if (output.Length + e.Data.Length > MaxOutputSize)
-                {
-                    outputTruncated = true;
-                    _logger?.LogWarning("CLI output exceeded {MaxSize} bytes, truncating", MaxOutputSize);
-                }
-                else
-                {
-                    output.AppendLine(e.Data);
-                }
-            }
-        };
-        process.ErrorDataReceived += (_, e) => { if (e.Data != null) error.AppendLine(e.Data); };
+        var result = await CliProcessRunner.RunAsync(
+            startInfo, timeoutMs, "claude-cli", cancellationToken,
+            _logger, TerminalOutput, enableHeartbeat: true
+        ).ConfigureAwait(false);
 
-        if (!process.Start())
-        {
-            throw new InvalidOperationException($"Failed to start process: {command}");
-        }
-
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        cts.CancelAfter(timeoutMs);
-
-        try
-        {
-            await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            try
-            {
-                if (!process.HasExited)
-                {
-                    process.Kill(true);
-                    await Task.Delay(100).ConfigureAwait(false); // Give process time to die
-                }
-            }
-            catch (Exception killEx)
-            {
-                _logger?.LogError(killEx, "CRITICAL: Failed to kill hung process - system may be experiencing resource exhaustion");
-                throw new InvalidOperationException(
-                    $"Command timed out after {timeoutMs}ms and process cleanup failed. " +
-                    $"System may be experiencing resource exhaustion.", killEx);
-            }
-
-            throw new TimeoutException($"Command timed out after {timeoutMs}ms");
-        }
-
-        // Cancel async readers and wait for them to complete
-        process.CancelOutputRead();
-        process.CancelErrorRead();
-
-        // Ensure all async output handlers have completed
-        process.WaitForExit();
-
-        if (process.ExitCode != 0)
-        {
-            var errorMessage = error.ToString().Trim();
-            if (string.IsNullOrEmpty(errorMessage))
-            {
-                errorMessage = $"Process exited with code {process.ExitCode}";
-            }
-
-            throw new InvalidOperationException($"Command failed with exit code {process.ExitCode}: {errorMessage}");
-        }
-
-        return output.ToString();
+        return result.Output;
     }
 }

@@ -31,10 +31,13 @@ public class HookHandlerFactoryTests : IDisposable
 
         var configManager = new ConfigurationManager(new Configuration());
         var loggerFactory = _serviceProvider.GetRequiredService<ILoggerFactory>();
+        var httpClientFactory = new Mock<IHttpClientFactory>();
+        httpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient());
         var llmClientProvider = new LLMClientProvider(
             configManager,
             loggerFactory,
-            _serviceProvider.GetRequiredService<ILogger<LLMClientProvider>>());
+            _serviceProvider.GetRequiredService<ILogger<LLMClientProvider>>(),
+            httpClientFactory.Object);
 
         _factory = new HookHandlerFactory(
             _serviceProvider,
