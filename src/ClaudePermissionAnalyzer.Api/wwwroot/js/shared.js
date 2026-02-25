@@ -392,14 +392,7 @@ const TerminalPanel = {
         this._initResize(panel.querySelector('#terminalResizeHandle'));
         this._initResize(panel.querySelector('#terminalHeader'));
 
-        // Restore saved height
-        const savedHeight = parseInt(localStorage.getItem(this.HEIGHT_KEY));
-        if (savedHeight && savedHeight >= this.MIN_HEIGHT) {
-            panel.style.setProperty('--terminal-height', savedHeight + 'px');
-            this._applyHeight(savedHeight);
-        }
-
-        // Restore open/closed state
+        // Restore open/closed state (open() applies the saved height)
         if (localStorage.getItem(this.STORAGE_KEY) === 'true') {
             this.open();
         }
