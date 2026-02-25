@@ -190,9 +190,11 @@ public class ClaudeHookController : ControllerBase
 
     private static object FormatPermissionResponse(HookOutput output)
     {
-        var decision = new Dictionary<string, object>
+        var permissionDecision = output.AutoApprove ? "allow" : "deny";
+
+        var hookOutput = new Dictionary<string, object>
         {
-            ["behavior"] = output.AutoApprove ? "allow" : "deny"
+            ["permissionDecision"] = permissionDecision
         };
 
         if (!output.AutoApprove)
@@ -200,20 +202,15 @@ public class ClaudeHookController : ControllerBase
             var reasoning = output.Reasoning.Length > 1000
                 ? output.Reasoning[..1000]
                 : output.Reasoning;
-            decision["message"] = $"Safety score {output.SafetyScore} below threshold {output.Threshold}. Reason: {reasoning}";
 
-            if (output.Interrupt)
-                decision["interrupt"] = true;
+            return new
+            {
+                hookSpecificOutput = hookOutput,
+                systemMessage = $"Safety score {output.SafetyScore} below threshold {output.Threshold}. Reason: {reasoning}"
+            };
         }
 
-        return new
-        {
-            hookSpecificOutput = new
-            {
-                hookEventName = "PermissionRequest",
-                decision
-            }
-        };
+        return new { hookSpecificOutput = hookOutput };
     }
 
     private static object FormatPreToolResponse(HookOutput output)
@@ -228,7 +225,6 @@ public class ClaudeHookController : ControllerBase
 
         var hookOutput = new Dictionary<string, object>
         {
-            ["hookEventName"] = "PreToolUse",
             ["permissionDecision"] = permissionDecision
         };
 
@@ -237,7 +233,12 @@ public class ClaudeHookController : ControllerBase
             var reasoning = output.Reasoning.Length > 1000
                 ? output.Reasoning[..1000]
                 : output.Reasoning;
-            hookOutput["permissionDecisionReason"] = reasoning;
+
+            return new
+            {
+                hookSpecificOutput = hookOutput,
+                systemMessage = reasoning
+            };
         }
 
         return new { hookSpecificOutput = hookOutput };
