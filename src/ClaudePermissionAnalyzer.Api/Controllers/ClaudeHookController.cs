@@ -190,11 +190,13 @@ public class ClaudeHookController : ControllerBase
 
     private static object FormatPermissionResponse(HookOutput output)
     {
-        var permissionDecision = output.AutoApprove ? "allow" : "deny";
+        // Claude Code PermissionRequest format:
+        // { hookSpecificOutput: { hookEventName, decision: { behavior, message? } } }
+        var behavior = output.AutoApprove ? "allow" : "deny";
 
-        var hookOutput = new Dictionary<string, object>
+        var decision = new Dictionary<string, object>
         {
-            ["permissionDecision"] = permissionDecision
+            ["behavior"] = behavior
         };
 
         if (!output.AutoApprove)
@@ -202,19 +204,23 @@ public class ClaudeHookController : ControllerBase
             var reasoning = output.Reasoning.Length > 1000
                 ? output.Reasoning[..1000]
                 : output.Reasoning;
-
-            return new
-            {
-                hookSpecificOutput = hookOutput,
-                systemMessage = $"Safety score {output.SafetyScore} below threshold {output.Threshold}. Reason: {reasoning}"
-            };
+            decision["message"] = $"Safety score {output.SafetyScore} below threshold {output.Threshold}. {reasoning}";
         }
 
-        return new { hookSpecificOutput = hookOutput };
+        return new
+        {
+            hookSpecificOutput = new Dictionary<string, object>
+            {
+                ["hookEventName"] = "PermissionRequest",
+                ["decision"] = decision
+            }
+        };
     }
 
     private static object FormatPreToolResponse(HookOutput output)
     {
+        // Claude Code PreToolUse format:
+        // { hookSpecificOutput: { hookEventName, permissionDecision, permissionDecisionReason? } }
         string permissionDecision;
         if (output.SafetyScore >= output.Threshold)
             permissionDecision = "allow";
@@ -225,6 +231,7 @@ public class ClaudeHookController : ControllerBase
 
         var hookOutput = new Dictionary<string, object>
         {
+            ["hookEventName"] = "PreToolUse",
             ["permissionDecision"] = permissionDecision
         };
 
@@ -233,12 +240,7 @@ public class ClaudeHookController : ControllerBase
             var reasoning = output.Reasoning.Length > 1000
                 ? output.Reasoning[..1000]
                 : output.Reasoning;
-
-            return new
-            {
-                hookSpecificOutput = hookOutput,
-                systemMessage = reasoning
-            };
+            hookOutput["permissionDecisionReason"] = reasoning;
         }
 
         return new { hookSpecificOutput = hookOutput };
@@ -246,6 +248,8 @@ public class ClaudeHookController : ControllerBase
 
     private static object FormatPostToolResponse(HookOutput output)
     {
+        // Claude Code PostToolUse format:
+        // { hookSpecificOutput: { hookEventName, additionalContext? }, decision?, reason? }
         if (!string.IsNullOrEmpty(output.SystemMessage))
         {
             return new
