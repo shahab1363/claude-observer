@@ -5,6 +5,94 @@
 var lastLogTimestamp = null;
 var lastLogCount = 0;
 
+/* ---------- Chip Filter Definitions & State ---------- */
+var chipDefinitions = {
+    hookType: ['PermissionRequest', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'UserPromptSubmit', 'Stop'],
+    toolName: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task'],
+    category: ['safe', 'cautious', 'risky', 'dangerous'],
+    decision: ['auto-approved', 'denied', 'no-handler']
+};
+
+var activeChipFilters = {};
+
+function initChipFilters() {
+    Object.keys(chipDefinitions).forEach(function(group) {
+        var storageKey = 'cpa-logs-chips-' + group;
+        var saved = null;
+        try { saved = JSON.parse(localStorage.getItem(storageKey)); } catch {}
+        if (Array.isArray(saved)) {
+            activeChipFilters[group] = new Set(saved);
+        } else {
+            // Default: all selected
+            activeChipFilters[group] = new Set(chipDefinitions[group]);
+        }
+        renderChipGroup(group);
+    });
+}
+
+function renderChipGroup(group) {
+    var container = document.getElementById('chipGroup-' + group);
+    if (!container) return;
+    var values = chipDefinitions[group];
+    var active = activeChipFilters[group];
+
+    var html = values.map(function(v) {
+        var isActive = active.has(v);
+        return '<span class="filter-chip ' + (isActive ? 'active' : '') + '" data-group="' + group + '" data-value="' + escapeHtml(v) + '" onclick="toggleChip(\'' + group + '\',\'' + escapeHtml(v) + '\')">' + escapeHtml(v) + '</span>';
+    }).join('');
+
+    var allActive = active.size === values.length;
+    html += '<span class="filter-chip toggle-all ' + (allActive ? 'active' : '') + '" onclick="toggleAllChips(\'' + group + '\')">Toggle All</span>';
+
+    container.innerHTML = html;
+}
+
+function toggleChip(group, value) {
+    var active = activeChipFilters[group];
+    if (active.has(value)) {
+        active.delete(value);
+    } else {
+        active.add(value);
+    }
+    saveChipState(group);
+    renderChipGroup(group);
+    lastLogTimestamp = null;
+    lastLogCount = 0;
+    loadLogs(true);
+}
+
+function toggleAllChips(group) {
+    var active = activeChipFilters[group];
+    var all = chipDefinitions[group];
+    if (active.size === all.length) {
+        // All selected -> deselect all
+        activeChipFilters[group] = new Set();
+    } else {
+        // Some/none selected -> select all
+        activeChipFilters[group] = new Set(all);
+    }
+    saveChipState(group);
+    renderChipGroup(group);
+    lastLogTimestamp = null;
+    lastLogCount = 0;
+    loadLogs(true);
+}
+
+function saveChipState(group) {
+    var storageKey = 'cpa-logs-chips-' + group;
+    try { localStorage.setItem(storageKey, JSON.stringify(Array.from(activeChipFilters[group]))); } catch {}
+}
+
+function getChipFilterParam(group) {
+    var active = activeChipFilters[group];
+    var all = chipDefinitions[group];
+    // If all or none selected, send no filter (show everything)
+    if (!active || active.size === 0 || active.size === all.length) return '';
+    return Array.from(active).join(',');
+}
+
+/* ---------- Data Loading ---------- */
+
 async function refreshData() {
     await loadLogs();
 }
@@ -13,10 +101,10 @@ async function loadLogs(forceFullRender) {
     const container = document.getElementById('logEntries');
     if (!container) return;
 
-    const decision = document.getElementById('filterDecision')?.value || '';
-    const category = document.getElementById('filterCategory')?.value || '';
-    const hookType = document.getElementById('filterHookType')?.value || '';
-    const toolName = document.getElementById('filterTool')?.value || '';
+    const decision = getChipFilterParam('decision');
+    const category = getChipFilterParam('category');
+    const hookType = getChipFilterParam('hookType');
+    const toolName = getChipFilterParam('toolName');
     const sessionId = document.getElementById('filterSession')?.value || '';
     const limit = document.getElementById('filterLimit')?.value || '100';
 
@@ -98,6 +186,8 @@ async function loadLogs(forceFullRender) {
     }
 }
 
+/* ---------- Rendering ---------- */
+
 function renderAllLogs(container, logs) {
     container.innerHTML = logs.map(function(log, i) {
         return buildLogEntryHtml(log, i);
@@ -122,6 +212,16 @@ function buildLogEntryHtml(log, i) {
                 <span class="log-expand">&#9660;</span>
             </div>
             <div class="log-detail" id="log-detail-${i}" style="display:none;">
+                ${log.safetyScore != null ? `
+                <div class="detail-section" style="background:var(--bg-tertiary,#f3f4f6);padding:8px 12px;border-radius:4px;font-size:0.85em;">
+                    <div class="detail-label">Model Response</div>
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-top:4px;">
+                        <span><strong>Score:</strong> ${log.safetyScore}</span>
+                        <span><strong>Category:</strong> <span class="category-badge category-${log.category || 'unknown'}">${escapeHtml(log.category || 'unknown')}</span></span>
+                        <span><strong>Decision:</strong> ${getDecisionLabel(log.decision)}</span>
+                        ${log.elapsedMs != null ? `<span><strong>Latency:</strong> ${log.elapsedMs}ms</span>` : ''}
+                    </div>
+                </div>` : ''}
                 ${toolInputSummary ? `
                 <div class="detail-section">
                     <div class="detail-label">Request Details</div>
@@ -135,6 +235,7 @@ function buildLogEntryHtml(log, i) {
                 <div class="detail-section detail-row">
                     ${log.category ? `<div><div class="detail-label">Category</div><span class="category-badge category-${log.category}">${escapeHtml(log.category)}</span></div>` : ''}
                     ${log.threshold != null ? `<div><div class="detail-label">Threshold</div><span>${log.threshold}</span></div>` : ''}
+                    ${log.elapsedMs != null ? `<div><div class="detail-label">Latency</div><span>${log.elapsedMs}ms</span></div>` : ''}
                     ${log.handlerName ? `<div><div class="detail-label">Handler</div><span class="handler-name">${escapeHtml(log.handlerName)}</span></div>` : ''}
                     ${log.promptTemplate ? `<div><div class="detail-label">Prompt Template</div><span class="prompt-template">${escapeHtml(log.promptTemplate)}</span></div>` : ''}
                 </div>
@@ -287,22 +388,18 @@ async function loadSessionFilter() {
     } catch { /* non-fatal */ }
 }
 
+/* ---------- Initialization ---------- */
+
 document.addEventListener('DOMContentLoaded', async () => {
-    // Restore saved filter values before first load
-    var filterIds = [
-        { id: 'filterDecision', key: 'cpa-logs-filter-decision' },
-        { id: 'filterCategory', key: 'cpa-logs-filter-category' },
-        { id: 'filterHookType', key: 'cpa-logs-filter-hooktype' },
-        { id: 'filterTool', key: 'cpa-logs-filter-tool' },
-        { id: 'filterLimit', key: 'cpa-logs-filter-limit' }
-    ];
-    filterIds.forEach(function(f) {
-        var el = document.getElementById(f.id);
-        if (el) {
-            var saved = loadFilter(f.key, '');
-            if (saved) el.value = saved;
-        }
-    });
+    // Initialize chip filters (restores from localStorage)
+    initChipFilters();
+
+    // Restore remaining dropdown filters
+    var limitEl = document.getElementById('filterLimit');
+    if (limitEl) {
+        var savedLimit = loadFilter('cpa-logs-filter-limit', '');
+        if (savedLimit) limitEl.value = savedLimit;
+    }
 
     // Restore checkbox states
     var chkAutoScroll = document.getElementById('chkAutoScrollLogs');
@@ -314,13 +411,9 @@ document.addEventListener('DOMContentLoaded', async () => {
     await loadSessionFilter();
     loadLogs(true);
 
-    // Filter changes force a full re-render and persist selection
-    document.getElementById('filterDecision')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-decision', this.value); loadLogs(true); });
-    document.getElementById('filterCategory')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-category', this.value); loadLogs(true); });
-    document.getElementById('filterHookType')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-hooktype', this.value); loadLogs(true); });
-    document.getElementById('filterTool')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-tool', this.value); loadLogs(true); });
-    document.getElementById('filterSession')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-session', this.value); loadLogs(true); });
-    document.getElementById('filterLimit')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-limit', this.value); loadLogs(true); });
+    // Dropdown filter changes
+    document.getElementById('filterSession')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-session', this.value); lastLogTimestamp = null; lastLogCount = 0; loadLogs(true); });
+    document.getElementById('filterLimit')?.addEventListener('change', function() { saveFilter('cpa-logs-filter-limit', this.value); lastLogTimestamp = null; lastLogCount = 0; loadLogs(true); });
 
     if (chkAutoScroll) {
         chkAutoScroll.addEventListener('change', function() { saveFilter('cpa-logs-autoscroll', this.checked); });

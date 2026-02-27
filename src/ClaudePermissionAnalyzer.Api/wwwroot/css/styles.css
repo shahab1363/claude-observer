@@ -2235,19 +2235,19 @@ kbd {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 12px;
+    padding: 8px 12px;
     cursor: pointer;
     font-size: 0.82em;
     transition: background 0.15s;
     white-space: nowrap;
 }
 .log-entry-detailed > .log-header .log-time { width: 60px; flex-shrink: 0; font-size: 0.9em; }
-.log-entry-detailed > .log-header .log-type-badge { width: 110px; flex-shrink: 0; text-align: center; font-size: 0.7em; overflow: hidden; text-overflow: ellipsis; }
+.log-entry-detailed > .log-header .log-type-badge { width: 110px; flex-shrink: 0; text-align: center; font-size: 0.7em; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }
 .log-entry-detailed > .log-header .log-tool { width: 70px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .log-entry-detailed > .log-header .log-request-preview { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.log-entry-detailed > .log-header .log-decision { width: 70px; flex-shrink: 0; text-align: center; }
+.log-entry-detailed > .log-header .log-decision { width: 70px; flex-shrink: 0; text-align: center; box-sizing: border-box; }
 .log-entry-detailed > .log-header .log-score { width: 36px; flex-shrink: 0; text-align: center; }
-.log-entry-detailed > .log-header .log-session { width: 64px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; }
+.log-entry-detailed > .log-header .log-session { width: 64px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; margin-left: 0; }
 .log-entry-detailed > .log-header .log-expand { width: 16px; flex-shrink: 0; }
 
 .log-header:hover {

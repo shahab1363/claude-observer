@@ -41,6 +41,13 @@ public class ClaudeHookController : ControllerBase
         _logger = logger;
     }
 
+    // Tools that should never be approved/denied — they are non-actionable UI interactions.
+    // Return {} (no opinion) so Claude handles them normally without hook interference.
+    private static readonly HashSet<string> PassthroughTools = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "AskUserQuestion"
+    };
+
     /// <summary>
     /// Main Claude hook endpoint. Called as:
     ///   curl -s -X POST http://localhost:5050/api/hooks/claude?event=PermissionRequest -H "Content-Type: application/json" -d @-
@@ -94,6 +101,15 @@ public class ClaudeHookController : ControllerBase
 
             if (handler == null || handler.Mode == "log-only")
             {
+                await TryLogEventAsync(input, null, handler, cancellationToken);
+                return Content("{}", "application/json");
+            }
+
+            // Non-actionable tools (e.g. AskUserQuestion) should never be approved/denied.
+            // Log the event but return no opinion so Claude handles them normally.
+            if (!string.IsNullOrEmpty(input.ToolName) && PassthroughTools.Contains(input.ToolName))
+            {
+                _logger.LogDebug("Passthrough tool {Tool} — skipping analysis", input.ToolName);
                 await TryLogEventAsync(input, null, handler, cancellationToken);
                 return Content("{}", "application/json");
             }
@@ -289,7 +305,8 @@ public class ClaudeHookController : ControllerBase
                 HandlerName = handler?.Name,
                 PromptTemplate = handler?.PromptTemplate != null ? Path.GetFileName(handler.PromptTemplate) : null,
                 Threshold = output?.Threshold ?? handler?.Threshold,
-                Provider = input.Provider
+                Provider = input.Provider,
+                ElapsedMs = output?.ElapsedMs
             };
 
             await _sessionManager.RecordEventAsync(input.SessionId, evt, ct);

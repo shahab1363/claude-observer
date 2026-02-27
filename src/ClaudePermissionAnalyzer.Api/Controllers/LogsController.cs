@@ -51,12 +51,13 @@ public class LogsController : ControllerBase
                     e.HandlerName,
                     e.PromptTemplate,
                     e.Threshold,
+                    e.ElapsedMs,
                     SessionId = s.SessionId
                 }))
-                .Where(e => string.IsNullOrEmpty(decision) || e.Decision == decision)
-                .Where(e => string.IsNullOrEmpty(category) || e.Category == category)
-                .Where(e => string.IsNullOrEmpty(toolName) || (e.ToolName != null && e.ToolName.Contains(toolName, StringComparison.OrdinalIgnoreCase)))
-                .Where(e => string.IsNullOrEmpty(hookType) || e.Type == hookType)
+                .Where(e => { var f = ParseFilterValues(decision); return f == null || (e.Decision != null && f.Contains(e.Decision)); })
+                .Where(e => { var f = ParseFilterValues(category); return f == null || (e.Category != null && f.Contains(e.Category)); })
+                .Where(e => { var f = ParseFilterValues(toolName); return f == null || (e.ToolName != null && f.Any(v => e.ToolName.Contains(v, StringComparison.OrdinalIgnoreCase))); })
+                .Where(e => { var f = ParseFilterValues(hookType); return f == null || (e.Type != null && f.Contains(e.Type)); })
                 .OrderByDescending(e => e.Timestamp)
                 .Take(limit)
                 .ToList();
@@ -106,6 +107,7 @@ public class LogsController : ControllerBase
                     e.HandlerName,
                     e.PromptTemplate,
                     e.Threshold,
+                    e.ElapsedMs,
                     SessionId = s.SessionId
                 }))
                 .OrderByDescending(e => e.Timestamp)
@@ -144,6 +146,7 @@ public class LogsController : ControllerBase
                     e.HandlerName,
                     e.PromptTemplate,
                     e.Threshold,
+                    e.ElapsedMs,
                     SessionId = s.SessionId
                 }))
                 .OrderByDescending(e => e.Timestamp)
@@ -167,6 +170,13 @@ public class LogsController : ControllerBase
             _logger.LogError(ex, "Failed to export logs as CSV");
             return StatusCode(500, new { error = "Failed to export logs" });
         }
+    }
+
+    private static HashSet<string>? ParseFilterValues(string? param)
+    {
+        if (string.IsNullOrWhiteSpace(param)) return null;
+        return param.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
     private static string EscapeCsvField(string field)

@@ -69,4 +69,7 @@ public class SessionEvent
 
     [JsonPropertyName("provider")]
     public string? Provider { get; set; }
+
+    [JsonPropertyName("elapsedMs")]
+    public long? ElapsedMs { get; set; }
 }
