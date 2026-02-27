@@ -121,7 +121,7 @@ public class CopilotHookController : ControllerBase
             IHookHandler handlerInstance;
             try
             {
-                handlerInstance = _handlerFactory.Create(handler.Mode, handler.PromptTemplate);
+                handlerInstance = _handlerFactory.Create(handler.Mode, handler.PromptTemplate, input.SessionId);
             }
             catch (NotSupportedException)
             {

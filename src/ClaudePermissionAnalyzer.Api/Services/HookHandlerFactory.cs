@@ -26,7 +26,7 @@ public class HookHandlerFactory
         _logger = logger;
     }
 
-    public virtual IHookHandler Create(string mode, string? promptTemplateName = null)
+    public virtual IHookHandler Create(string mode, string? promptTemplateName = null, string? sessionId = null)
     {
         string? promptTemplate = null;
         if (!string.IsNullOrEmpty(promptTemplateName))
@@ -34,7 +34,7 @@ public class HookHandlerFactory
             promptTemplate = _promptTemplateService.GetTemplate(promptTemplateName);
         }
 
-        var llmClient = _llmClientProvider.GetClient();
+        var llmClient = _llmClientProvider.GetClientForSession(sessionId);
 
         return mode switch
         {

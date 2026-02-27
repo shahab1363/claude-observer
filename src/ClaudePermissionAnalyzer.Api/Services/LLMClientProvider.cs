@@ -1,5 +1,6 @@
 using ClaudePermissionAnalyzer.Api.Models;
 using Microsoft.Extensions.Logging;
+using System.Collections.Concurrent;
 
 namespace ClaudePermissionAnalyzer.Api.Services;
 
@@ -7,6 +8,8 @@ namespace ClaudePermissionAnalyzer.Api.Services;
 /// Runtime LLM provider registry and switcher. Maps provider names to factory functions.
 /// Reads config.Llm.Provider on each call and delegates to the matching client.
 /// Caches the active client and recreates it if the provider changes.
+/// For the "claude-persistent" provider, maintains per-session client instances so
+/// multiple Claude Code sessions can query the LLM in parallel.
 /// Registered as singleton ILLMClient in DI.
 /// </summary>
 public class LLMClientProvider : ILLMClient, IDisposable
@@ -23,6 +26,14 @@ public class LLMClientProvider : ILLMClient, IDisposable
 
     private readonly Dictionary<string, Func<LlmConfig, ILLMClient>> _factories;
 
+    // Per-session persistent client registry
+    private readonly ConcurrentDictionary<string, SessionClientEntry> _sessionClients = new();
+    private readonly Timer _cleanupTimer;
+    private const int IdleTimeoutMinutes = 10;
+    private const int CleanupIntervalMinutes = 5;
+
+    private record SessionClientEntry(ILLMClient Client, DateTime LastUsed);
+
     public LLMClientProvider(
         ConfigurationManager configManager,
         ILoggerFactory loggerFactory,
@@ -35,6 +46,10 @@ public class LLMClientProvider : ILLMClient, IDisposable
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _httpClientFactory = httpClientFactory;
         _terminalOutput = terminalOutput;
+
+        _cleanupTimer = new Timer(CleanupIdleSessions, null,
+            TimeSpan.FromMinutes(CleanupIntervalMinutes),
+            TimeSpan.FromMinutes(CleanupIntervalMinutes));
 
         _factories = new(StringComparer.OrdinalIgnoreCase)
         {
@@ -129,6 +144,54 @@ public class LLMClientProvider : ILLMClient, IDisposable
         }
     }
 
+    /// <summary>
+    /// Returns an ILLMClient scoped to the given session. For the "claude-persistent" provider,
+    /// each session gets its own PersistentClaudeClient so multiple sessions can query in parallel.
+    /// For all other providers, returns the shared client (they handle concurrency via HTTP).
+    /// </summary>
+    public ILLMClient GetClientForSession(string? sessionId)
+    {
+        var provider = _configManager.GetConfiguration().Llm.Provider ?? "anthropic-api";
+
+        // Only the persistent provider benefits from per-session instances
+        if (sessionId == null || !provider.Equals("claude-persistent", StringComparison.OrdinalIgnoreCase))
+            return GetClient();
+
+        var entry = _sessionClients.AddOrUpdate(
+            sessionId,
+            _ =>
+            {
+                var config = _configManager.GetConfiguration().Llm;
+                var client = new PersistentClaudeClient(
+                    config,
+                    _loggerFactory.CreateLogger<PersistentClaudeClient>(),
+                    _terminalOutput,
+                    _configManager);
+                _logger.LogInformation("Created per-session persistent client for session {SessionId}", sessionId);
+                return new SessionClientEntry(client, DateTime.UtcNow);
+            },
+            (_, existing) => existing with { LastUsed = DateTime.UtcNow });
+
+        return entry.Client;
+    }
+
+    private void CleanupIdleSessions(object? state)
+    {
+        var cutoff = DateTime.UtcNow.AddMinutes(-IdleTimeoutMinutes);
+        foreach (var kvp in _sessionClients)
+        {
+            if (kvp.Value.LastUsed < cutoff)
+            {
+                if (_sessionClients.TryRemove(kvp.Key, out var removed))
+                {
+                    _logger.LogInformation("Disposing idle per-session client for session {SessionId}", kvp.Key);
+                    if (removed.Client is IDisposable disposable)
+                        disposable.Dispose();
+                }
+            }
+        }
+    }
+
     private HttpClient CreateHttpClient()
     {
         if (_httpClientFactory != null)
@@ -140,6 +203,15 @@ public class LLMClientProvider : ILLMClient, IDisposable
 
     public void Dispose()
     {
+        _cleanupTimer.Dispose();
+
+        // Dispose all per-session clients
+        foreach (var kvp in _sessionClients)
+        {
+            if (_sessionClients.TryRemove(kvp.Key, out var removed) && removed.Client is IDisposable d)
+                d.Dispose();
+        }
+
         lock (_lock)
         {
             if (_cachedClient is IDisposable disposable)

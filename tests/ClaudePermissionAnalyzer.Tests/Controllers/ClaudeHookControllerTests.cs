@@ -284,7 +284,7 @@ public class ClaudeHookControllerTests : IDisposable
             .ReturnsAsync(approvedOutput);
 
         _mockHandlerFactory
-            .Setup(f => f.Create("llm-analysis", It.IsAny<string?>()))
+            .Setup(f => f.Create("llm-analysis", It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(mockHandler.Object);
 
         // ProfileService should return reasonable values
@@ -366,7 +366,7 @@ public class ClaudeHookControllerTests : IDisposable
             .ReturnsAsync(deniedOutput);
 
         _mockHandlerFactory
-            .Setup(f => f.Create("llm-analysis", It.IsAny<string?>()))
+            .Setup(f => f.Create("llm-analysis", It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(mockHandler.Object);
 
         _mockProfileService
@@ -444,7 +444,7 @@ public class ClaudeHookControllerTests : IDisposable
             .ThrowsAsync(new InvalidOperationException("LLM service unavailable"));
 
         _mockHandlerFactory
-            .Setup(f => f.Create("llm-analysis", It.IsAny<string?>()))
+            .Setup(f => f.Create("llm-analysis", It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(mockHandler.Object);
 
         _mockProfileService
@@ -492,7 +492,7 @@ public class ClaudeHookControllerTests : IDisposable
 
         // Verify that the handler factory was never called when enforcement is off
         _mockHandlerFactory.Verify(
-            f => f.Create(It.IsAny<string>(), It.IsAny<string?>()),
+            f => f.Create(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<string?>()),
             Times.Never);
     }
 
@@ -573,7 +573,7 @@ public class ClaudeHookControllerTests : IDisposable
 
         // Factory throws NotSupportedException for unknown mode
         _mockHandlerFactory
-            .Setup(f => f.Create("unsupported-mode", It.IsAny<string?>()))
+            .Setup(f => f.Create("unsupported-mode", It.IsAny<string?>(), It.IsAny<string?>()))
             .Throws(new NotSupportedException("Handler mode 'unsupported-mode' is not supported"));
 
         _mockProfileService
@@ -647,7 +647,7 @@ public class ClaudeHookControllerTests : IDisposable
             .ReturnsAsync(deniedOutput);
 
         _mockHandlerFactory
-            .Setup(f => f.Create("llm-analysis", It.IsAny<string?>()))
+            .Setup(f => f.Create("llm-analysis", It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(mockHandler.Object);
 
         _mockProfileService
@@ -726,7 +726,7 @@ public class ClaudeHookControllerTests : IDisposable
             .ReturnsAsync(approvedOutput);
 
         _mockHandlerFactory
-            .Setup(f => f.Create("llm-analysis", It.IsAny<string?>()))
+            .Setup(f => f.Create("llm-analysis", It.IsAny<string?>(), It.IsAny<string?>()))
             .Returns(mockHandler.Object);
 
         _mockProfileService
