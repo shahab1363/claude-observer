@@ -17,13 +17,12 @@ This is **Claude Observer** -- a C# ASP.NET Core (.NET 10) service that observes
 ```bash
 dotnet build                                                           # Build
 dotnet test                                                            # Run tests
-dotnet run --project src/ClaudePermissionAnalyzer.Api                  # Run (interactive prompt)
-dotnet run --project src/ClaudePermissionAnalyzer.Api -- --install-hooks          # Auto-install hooks
-dotnet run --project src/ClaudePermissionAnalyzer.Api -- --install-hooks --enforce # Install + enforce
-dotnet run --project src/ClaudePermissionAnalyzer.Api -- --no-hooks               # Skip hooks
+dotnet run --project src/ClaudePermissionAnalyzer.Api                  # Run (auto-installs hooks)
+dotnet run --project src/ClaudePermissionAnalyzer.Api -- --enforce     # Run + enforce mode
+dotnet run --project src/ClaudePermissionAnalyzer.Api -- --no-hooks    # Run without hooks
 ```
 
-**On startup:** loads config -> prompts to install hooks -> starts at `http://localhost:5050` -> opens browser -> on Ctrl+C removes hooks
+**On startup:** loads config -> installs hooks -> starts at `http://localhost:5050` -> opens browser -> on Ctrl+C removes hooks
 
 ## Tech Stack
 

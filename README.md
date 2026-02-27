@@ -1,126 +1,158 @@
 # Claude Observer
 
-An intelligent permission observer and automation system for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) that uses LLM-based safety analysis to monitor, log, and optionally auto-approve or deny tool permission requests.
+A local service that monitors every tool call [Claude Code](https://docs.anthropic.com/en/docs/claude-code) makes, scores it for safety using an LLM, and gives you a real-time dashboard to see exactly what's happening. Optionally, it can auto-approve or deny requests based on the safety score.
+
+## Why
+
+Claude Code asks for permission before running commands, reading files, or making edits. When you're deep in a task, clicking "allow" dozens of times breaks your flow. But blindly auto-approving everything is risky.
+
+Claude Observer sits in the middle: it intercepts every permission request, runs it through a safety analysis, and either logs it silently (observe mode) or makes the approve/deny decision for you (enforce mode). Either way, you get full visibility into what Claude is doing.
 
 ## How It Works
 
 ```
-Claude Code  -->  curl hook  -->  POST /api/hooks/claude  -->  LLM safety analysis  -->  approve/deny/passthrough
+Claude Code  -->  curl hook  -->  Claude Observer  -->  LLM safety analysis  -->  decision
 ```
 
-1. Claude Code triggers a hook event (e.g., `PermissionRequest`, `PreToolUse`)
-2. A `curl` command (installed in `~/.claude/settings.json`) sends the event to the local service
-3. The service evaluates the request using a Claude CLI subprocess
-4. In **observe mode** (default): logs the event and returns `{}` (Claude asks user as normal)
-5. In **enforce mode**: returns an approve/deny decision based on the safety score
+Hooks are lightweight `curl` commands injected into `~/.claude/settings.json`. When Claude Code triggers a tool call, the hook sends the request to the local service. The service scores it 0-100, categorizes it (safe/cautious/risky/dangerous), and either:
 
-Zero external dependencies. No Python, no npm. Just `curl` and `.NET`.
+- **Observe mode** (default): Logs everything, returns no opinion. Claude asks you as normal.
+- **Enforce mode**: Returns approve/deny based on the safety score vs threshold.
 
-## Features
-
-- **Observe or Enforce** -- default observe-only mode logs everything without interfering; toggle enforcement from the dashboard
-- **LLM Safety Scoring** -- each tool request is scored 0-100 with category (safe/cautious/risky/dangerous) and detailed reasoning
-- **Web Dashboard** -- real-time stats, session timelines, live logs with multi-select filter chips, transcript browser, prompt editor, config management
-- **Session Tracking** -- contextual awareness from conversation history per session
-- **Adaptive Thresholds** -- learns from user overrides to adjust scoring
-- **Permission Profiles** -- switch between permissive/moderate/strict/lockdown presets
-- **Audit Reports** -- exportable HTML/JSON audit reports per session
-- **Passthrough Tools** -- non-actionable tools like `AskUserQuestion` are automatically skipped
-
-## Prerequisites
-
-- [.NET 10 SDK](https://dotnet.microsoft.com/download) (or later)
-- [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) (`claude` command in PATH)
-- `curl` (included on Windows 10+, macOS, Linux)
+Zero external dependencies beyond .NET and `curl`. No Python, no npm, no Docker.
 
 ## Quick Start
 
 ```bash
-# Clone and build
 git clone https://github.com/shahab1363/claude-observer.git
 cd claude-observer
 dotnet build
-
-# Run (prompts to install hooks on startup)
 dotnet run --project src/ClaudePermissionAnalyzer.Api
-
-# Or auto-install hooks
-dotnet run --project src/ClaudePermissionAnalyzer.Api -- --install-hooks
-
-# Or install hooks + enable enforcement
-dotnet run --project src/ClaudePermissionAnalyzer.Api -- --install-hooks --enforce
-
-# Skip hook installation
-dotnet run --project src/ClaudePermissionAnalyzer.Api -- --no-hooks
 ```
 
-On startup the service:
-1. Loads config from `~/.claude-permission-analyzer/config.json` (auto-created)
-2. Optionally installs curl hooks into `~/.claude/settings.json`
-3. Starts at **http://localhost:5050** and opens the browser
-4. On `Ctrl+C`, removes installed hooks cleanly
+That's it. On startup the service:
 
-## Web Dashboard
+1. Installs hooks into `~/.claude/settings.json` automatically
+2. Starts at **http://localhost:5050** and opens the dashboard
+3. Prints an in-place status line showing live event counts and latency
+4. On `Ctrl+C`, removes all installed hooks cleanly
 
-| Page | URL | Description |
-|------|-----|-------------|
-| Dashboard | `/` | Stats, charts, profiles, insights, hooks install/enforce toggles |
-| Live Logs | `/logs.html` | Multi-select filter chips, incremental updates, auto-scroll, export CSV/JSON |
-| Sessions | `/session.html` | Session list, detail timeline, filter chips, live refresh |
-| Transcripts | `/transcripts.html` | Project/session browser, SSE live stream, markdown rendering, export |
-| Prompt Editor | `/prompts.html` | Edit LLM prompt templates used for safety analysis |
-| Configuration | `/config.html` | Service config + hook handler management |
-| Claude Settings | `/claude-settings.html` | JSON editor for `~/.claude/settings.json` |
+Use `--no-hooks` to skip hook installation, or `--enforce` to start in enforcement mode.
+
+## Prerequisites
+
+- [.NET 10 SDK](https://dotnet.microsoft.com/download)
+- [Claude CLI](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated
+- `curl` (ships with Windows 10+, macOS, and Linux)
+
+## Dashboard
+
+The web UI at `http://localhost:5050` has 7 pages:
+
+| Page | What it shows |
+|------|---------------|
+| **Dashboard** | Live stats, safety score charts, permission profiles, quick actions, hook controls |
+| **Live Logs** | Every hook event with multi-select filter chips, LLM reasoning, response JSON, export to CSV/JSON |
+| **Sessions** | Per-session timelines with event breakdowns and filter chips |
+| **Transcripts** | Browse Claude's conversation transcripts with SSE live streaming, markdown rendering |
+| **Prompt Editor** | Edit the LLM prompt templates that drive safety analysis |
+| **Configuration** | Hook handler management: matchers, modes, thresholds, prompt templates |
+| **Claude Settings** | Direct JSON editor for `~/.claude/settings.json` |
 
 ## Configuration
 
-Config file: `~/.claude-permission-analyzer/config.json` (auto-created on first run)
+Config lives at `~/.claude-permission-analyzer/config.json` (auto-created on first run).
 
 ```json
 {
-  "llm": { "provider": "claude-cli", "model": "sonnet", "timeout": 30000, "persistentProcess": true },
+  "llm": {
+    "provider": "claude-cli",
+    "model": "sonnet",
+    "timeout": 30000,
+    "persistentProcess": true
+  },
   "server": { "port": 5050, "host": "localhost" },
-  "security": { "apiKey": null, "rateLimitPerMinute": 600 },
-  "profiles": { "activeProfile": "moderate" },
   "enforcementEnabled": false,
   "hookHandlers": {
-    "PermissionRequest": { "enabled": true, "handlers": [
-      { "name": "bash-analyzer", "matcher": "Bash", "mode": "llm-analysis", "promptTemplate": "bash-prompt.txt", "threshold": 95, "autoApprove": true }
-    ]}
+    "PermissionRequest": {
+      "enabled": true,
+      "handlers": [{
+        "name": "bash-analyzer",
+        "matcher": "Bash",
+        "mode": "llm-analysis",
+        "promptTemplate": "bash-prompt.txt",
+        "threshold": 95,
+        "autoApprove": true
+      }]
+    }
   }
 }
 ```
 
-Key settings:
-- **`enforcementEnabled`** -- `false` = observe only (log but don't decide), `true` = approve/deny
-- **`hookHandlers`** -- configure which tools get analyzed, with what prompt template, and at what threshold
-- **`profiles.activeProfile`** -- `permissive`, `moderate`, `strict`, or `lockdown`
+**Key settings:**
 
-## Development
+| Setting | What it does |
+|---------|-------------|
+| `enforcementEnabled` | `false` = observe only, `true` = auto-approve/deny |
+| `hookHandlers` | Which tools get analyzed, with what prompt, at what threshold |
+| `profiles.activeProfile` | `permissive` / `moderate` / `strict` / `lockdown` |
+| `llm.persistentProcess` | Keep a single Claude subprocess alive for faster responses |
+
+## CLI Flags
 
 ```bash
-dotnet build    # Build
-dotnet test     # Run tests (xUnit)
-dotnet run --project src/ClaudePermissionAnalyzer.Api    # Run locally
+dotnet run --project src/ClaudePermissionAnalyzer.Api             # Start with hooks, observe mode
+dotnet run --project src/ClaudePermissionAnalyzer.Api -- --enforce # Start with enforcement enabled
+dotnet run --project src/ClaudePermissionAnalyzer.Api -- --no-hooks # Start without installing hooks
 ```
+
+## How Hooks Work
+
+The service writes `curl` commands into `~/.claude/settings.json` tagged with a `# claude-analyzer` marker:
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Bash",
+      "hooks": [{
+        "type": "command",
+        "command": "curl -sS -X POST \"http://localhost:5050/api/hooks/claude?event=PreToolUse\" -H \"Content-Type: application/json\" -d @- # claude-analyzer"
+      }]
+    }]
+  }
+}
+```
+
+On shutdown, only hooks with the `# claude-analyzer` marker are removed. Your own hooks are never touched.
+
+## Security
+
+- Localhost-only binding with CORS restrictions
+- Security headers (CSP, X-Frame-Options, no-cache)
+- Rate limiting (600 req/min per IP)
+- Optional API key authentication
+- Input sanitization and path traversal protection
+- Any hook error returns `{}` (no opinion) so Claude falls through to normal behavior
 
 ## Tech Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | C# .NET 10, ASP.NET Core Controllers |
-| Hook Transport | `curl` (zero dependencies) |
+| Backend | C# .NET 10, ASP.NET Core |
+| Hook Transport | `curl` |
 | Frontend | Vanilla HTML/CSS/JS (no CDN dependencies) |
-| LLM Integration | Claude CLI subprocess |
-| Storage | JSON files on disk + in-memory MemoryCache |
-| Tests | xUnit + Moq |
+| LLM | Claude CLI subprocess |
+| Storage | JSON files + MemoryCache |
+| Tests | xUnit + Moq (143 tests) |
 
-## Security
+## Development
 
-- Localhost-only binding with CORS restrictions
-- Security headers middleware (CSP, X-Frame-Options)
-- Rate limiting (600 req/min per IP)
-- Optional API key authentication
-- Input sanitization and path traversal protection
-- Hook error safety: any error returns `{}` (no opinion, Claude asks user)
+```bash
+dotnet build    # Build
+dotnet test     # Run 143 tests
+```
 
+## Releases
+
+CI builds self-contained binaries for Windows x64, Linux x64, macOS x64, and macOS ARM64. See the [Releases](https://github.com/shahab1363/claude-observer/releases) page.
