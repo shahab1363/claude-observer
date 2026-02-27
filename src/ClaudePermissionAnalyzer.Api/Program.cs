@@ -186,9 +186,8 @@ builder.Services.AddSingleton<CopilotHookInstaller>(sp =>
         $"http://{config.Server.Host}:{config.Server.Port}"));
 
 // Console status line for aggregated stats
-var modeLabel = config.EnforcementEnabled ? "ENFORCE" : "OBSERVE";
 var appUrl = $"http://{config.Server.Host}:{config.Server.Port}";
-builder.Services.AddSingleton(new ConsoleStatusService(modeLabel, appUrl));
+builder.Services.AddSingleton<ConsoleStatusService>();
 
 // Add OpenAPI/Swagger documentation
 builder.Services.AddOpenApi();
@@ -377,6 +376,7 @@ app.UseCors();
 app.UseAuthorization();
 app.MapControllers();
 
+var modeLabel = config.EnforcementEnabled ? "ENFORCE" : "OBSERVE";
 Console.WriteLine($"  Claude Observer | {modeLabel} mode | {appUrl}");
 Console.WriteLine($"  Hooks: {(hooksInstalledThisSession ? "installed" : "skipped")} | Dashboard: {appUrl}");
 Console.WriteLine($"  Press Ctrl+C to stop (hooks will be auto-removed)");

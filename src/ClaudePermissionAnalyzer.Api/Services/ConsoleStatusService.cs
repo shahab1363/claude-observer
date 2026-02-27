@@ -8,7 +8,7 @@ namespace ClaudePermissionAnalyzer.Api.Services;
 /// </summary>
 public class ConsoleStatusService
 {
-    private readonly string _mode;
+    private readonly EnforcementService _enforcementService;
     private readonly object _writeLock = new();
     private long _totalEvents;
     private long _approved;
@@ -22,9 +22,9 @@ public class ConsoleStatusService
     private readonly Dictionary<string, long> _eventTypeCounts = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _countsLock = new();
 
-    public ConsoleStatusService(string mode, string url)
+    public ConsoleStatusService(EnforcementService enforcementService)
     {
-        _mode = mode;
+        _enforcementService = enforcementService;
     }
 
     public void RecordEvent(string? decision, string? toolName, int? safetyScore, long? elapsedMs)
@@ -78,7 +78,8 @@ public class ConsoleStatusService
         }
 
         var sb = new StringBuilder();
-        sb.Append($"\r  {_mode} | {total} events");
+        var mode = _enforcementService.IsEnforced ? "ENFORCE" : "OBSERVE";
+        sb.Append($"\r  {mode} | {total} events");
         if (approved > 0) sb.Append($" | {approved} approved");
         if (denied > 0) sb.Append($" | {denied} denied");
         if (scored > 0) sb.Append($" | avg:{avgScore}");
