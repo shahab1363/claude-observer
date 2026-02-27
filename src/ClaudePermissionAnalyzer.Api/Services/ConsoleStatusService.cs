@@ -3,28 +3,34 @@ using System.Text;
 namespace ClaudePermissionAnalyzer.Api.Services;
 
 /// <summary>
-/// Tracks aggregated hook event stats and renders an in-place console status line.
-/// Thread-safe — called from concurrent HTTP request threads.
+/// Tracks aggregated hook event stats and renders a fixed multi-line console block
+/// using ANSI escape codes for in-place updates. Refreshes on a 500ms timer to
+/// avoid flickering from rapid event bursts.
 /// </summary>
-public class ConsoleStatusService
+public class ConsoleStatusService : IDisposable
 {
+    private const int DisplayLines = 4;
+
     private readonly EnforcementService _enforcementService;
     private readonly object _writeLock = new();
+    private readonly Timer _renderTimer;
+    private bool _dirty;
+    private bool _rendered;
+
     private long _totalEvents;
     private long _approved;
     private long _denied;
     private long _passthrough;
-    private long _totalLatencyMs;
     private long _scoredEvents;
     private long _totalScore;
 
-    // Per-event-type counters
-    private readonly Dictionary<string, long> _eventTypeCounts = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, long> _toolCounts = new(StringComparer.OrdinalIgnoreCase);
     private readonly object _countsLock = new();
 
     public ConsoleStatusService(EnforcementService enforcementService)
     {
         _enforcementService = enforcementService;
+        _renderTimer = new Timer(_ => FlushRender(), null, 500, 500);
     }
 
     public void RecordEvent(string? decision, string? toolName, int? safetyScore, long? elapsedMs)
@@ -44,19 +50,20 @@ public class ConsoleStatusService
             Interlocked.Add(ref _totalScore, safetyScore.Value);
         }
 
-        if (elapsedMs.HasValue && elapsedMs.Value > 0)
-        {
-            Interlocked.Add(ref _totalLatencyMs, elapsedMs.Value);
-        }
-
-        // Track per-tool counts
         var tool = toolName ?? "other";
         lock (_countsLock)
         {
-            _eventTypeCounts.TryGetValue(tool, out var count);
-            _eventTypeCounts[tool] = count + 1;
+            _toolCounts.TryGetValue(tool, out var count);
+            _toolCounts[tool] = count + 1;
         }
 
+        _dirty = true;
+    }
+
+    private void FlushRender()
+    {
+        if (!_dirty) return;
+        _dirty = false;
         Render();
     }
 
@@ -65,34 +72,64 @@ public class ConsoleStatusService
         var total = Interlocked.Read(ref _totalEvents);
         var approved = Interlocked.Read(ref _approved);
         var denied = Interlocked.Read(ref _denied);
+        var passthrough = Interlocked.Read(ref _passthrough);
         var scored = Interlocked.Read(ref _scoredEvents);
         var avgScore = scored > 0 ? Interlocked.Read(ref _totalScore) / scored : 0;
+        var mode = _enforcementService.IsEnforced ? "ENFORCE" : "OBSERVE";
 
-        // Build tools breakdown: "Bash:5 Read:3 Write:1"
-        string toolsBreakdown;
+        // Build tool breakdown pairs
+        KeyValuePair<string, long>[] tools;
         lock (_countsLock)
         {
-            toolsBreakdown = string.Join("  ", _eventTypeCounts
-                .OrderByDescending(kv => kv.Value)
-                .Select(kv => $"{kv.Key}:{kv.Value}"));
+            tools = _toolCounts.OrderByDescending(kv => kv.Value).ToArray();
         }
 
-        var sb = new StringBuilder();
-        var mode = _enforcementService.IsEnforced ? "ENFORCE" : "OBSERVE";
-        sb.Append($"\r  {mode} | {total} events");
-        if (approved > 0) sb.Append($" | {approved} approved");
-        if (denied > 0) sb.Append($" | {denied} denied");
-        if (scored > 0) sb.Append($" | avg:{avgScore}");
-        sb.Append($" | {toolsBreakdown}");
+        // Line 1: mode + summary
+        var line1 = $"  {mode} | {total} events | approved:{approved}  denied:{denied}  pass:{passthrough}";
+        if (scored > 0) line1 += $"  avg-score:{avgScore}";
 
-        // Pad to clear previous line remnants
-        var status = sb.ToString();
-        if (status.Length < 120)
-            status = status.PadRight(120);
+        // Line 2-3: tool breakdown (wrap at ~70 chars)
+        var toolLines = new List<string>();
+        var current = new StringBuilder("  Tools: ");
+        foreach (var kv in tools)
+        {
+            var entry = $"{kv.Key}:{kv.Value}  ";
+            if (current.Length + entry.Length > 78 && current.Length > 10)
+            {
+                toolLines.Add(current.ToString());
+                current = new StringBuilder("         ");
+            }
+            current.Append(entry);
+        }
+        if (current.Length > 10) toolLines.Add(current.ToString());
+
+        // Assemble output block (always exactly DisplayLines lines)
+        var lines = new string[DisplayLines];
+        lines[0] = line1;
+        for (int i = 0; i < DisplayLines - 1; i++)
+            lines[i + 1] = i < toolLines.Count ? toolLines[i] : "";
 
         lock (_writeLock)
         {
-            Console.Write(status);
+            var sb = new StringBuilder();
+
+            // Move cursor up to overwrite previous block
+            if (_rendered)
+                sb.Append($"\x1b[{DisplayLines}A");
+
+            for (int i = 0; i < DisplayLines; i++)
+            {
+                sb.Append("\x1b[2K"); // Clear entire line
+                sb.AppendLine(lines[i]);
+            }
+
+            _rendered = true;
+            Console.Write(sb);
         }
+    }
+
+    public void Dispose()
+    {
+        _renderTimer.Dispose();
     }
 }
