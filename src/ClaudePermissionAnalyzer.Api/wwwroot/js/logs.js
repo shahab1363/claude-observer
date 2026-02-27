@@ -212,16 +212,6 @@ function buildLogEntryHtml(log, i) {
                 <span class="log-expand">&#9660;</span>
             </div>
             <div class="log-detail" id="log-detail-${i}" style="display:none;">
-                ${log.safetyScore != null ? `
-                <div class="detail-section" style="background:var(--bg-tertiary,#f3f4f6);padding:8px 12px;border-radius:4px;font-size:0.85em;">
-                    <div class="detail-label">Model Response</div>
-                    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:center;margin-top:4px;">
-                        <span><strong>Score:</strong> ${log.safetyScore}</span>
-                        <span><strong>Category:</strong> <span class="category-badge category-${log.category || 'unknown'}">${escapeHtml(log.category || 'unknown')}</span></span>
-                        <span><strong>Decision:</strong> ${getDecisionLabel(log.decision)}</span>
-                        ${log.elapsedMs != null ? `<span><strong>Latency:</strong> ${log.elapsedMs}ms</span>` : ''}
-                    </div>
-                </div>` : ''}
                 ${toolInputSummary ? `
                 <div class="detail-section">
                     <div class="detail-label">Request Details</div>
@@ -232,9 +222,16 @@ function buildLogEntryHtml(log, i) {
                     <div class="detail-label">LLM Reasoning</div>
                     <div class="detail-content">${escapeHtml(log.reasoning)}</div>
                 </div>` : ''}
+                ${log.responseJson ? `
+                <div class="detail-section">
+                    <div class="detail-label">Response JSON (returned to Claude)</div>
+                    <pre class="detail-content" style="font-size:0.85em;">${escapeHtml(log.responseJson)}</pre>
+                </div>` : ''}
                 <div class="detail-section detail-row">
-                    ${log.category ? `<div><div class="detail-label">Category</div><span class="category-badge category-${log.category}">${escapeHtml(log.category)}</span></div>` : ''}
                     ${log.threshold != null ? `<div><div class="detail-label">Threshold</div><span>${log.threshold}</span></div>` : ''}
+                    ${log.safetyScore != null ? `<div><div class="detail-label">Score</div><span class="${getScoreClass(log.safetyScore)}">${log.safetyScore}</span></div>` : ''}
+                    ${log.decision ? `<div><div class="detail-label">Decision</div><span class="log-decision ${getDecisionClass(log.decision)}">${getDecisionLabel(log.decision)}</span></div>` : ''}
+                    ${log.category ? `<div><div class="detail-label">Category</div><span class="category-badge category-${log.category}">${escapeHtml(log.category)}</span></div>` : ''}
                     ${log.elapsedMs != null ? `<div><div class="detail-label">Latency</div><span>${log.elapsedMs}ms</span></div>` : ''}
                     ${log.handlerName ? `<div><div class="detail-label">Handler</div><span class="handler-name">${escapeHtml(log.handlerName)}</span></div>` : ''}
                     ${log.promptTemplate ? `<div><div class="detail-label">Prompt Template</div><span class="prompt-template">${escapeHtml(log.promptTemplate)}</span></div>` : ''}

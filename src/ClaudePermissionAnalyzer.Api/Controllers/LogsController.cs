@@ -52,6 +52,7 @@ public class LogsController : ControllerBase
                     e.PromptTemplate,
                     e.Threshold,
                     e.ElapsedMs,
+                    e.ResponseJson,
                     SessionId = s.SessionId
                 }))
                 .Where(e => { var f = ParseFilterValues(decision); return f == null || (e.Decision != null && f.Contains(e.Decision)); })
@@ -108,6 +109,7 @@ public class LogsController : ControllerBase
                     e.PromptTemplate,
                     e.Threshold,
                     e.ElapsedMs,
+                    e.ResponseJson,
                     SessionId = s.SessionId
                 }))
                 .OrderByDescending(e => e.Timestamp)
@@ -147,6 +149,7 @@ public class LogsController : ControllerBase
                     e.PromptTemplate,
                     e.Threshold,
                     e.ElapsedMs,
+                    e.ResponseJson,
                     SessionId = s.SessionId
                 }))
                 .OrderByDescending(e => e.Timestamp)

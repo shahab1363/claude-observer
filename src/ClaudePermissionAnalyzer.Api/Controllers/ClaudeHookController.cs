@@ -293,6 +293,14 @@ public class ClaudeHookController : ControllerBase
                 _ => "denied"
             };
 
+            // Build the response JSON that would be (or was) returned to Claude
+            string? responseJson = null;
+            if (output != null)
+            {
+                var claudeResponse = FormatClaudeResponse(input.HookEventName, output);
+                responseJson = JsonSerializer.Serialize(claudeResponse, new JsonSerializerOptions { WriteIndented = true });
+            }
+
             var evt = new SessionEvent
             {
                 Type = input.HookEventName,
@@ -306,7 +314,8 @@ public class ClaudeHookController : ControllerBase
                 PromptTemplate = handler?.PromptTemplate != null ? Path.GetFileName(handler.PromptTemplate) : null,
                 Threshold = output?.Threshold ?? handler?.Threshold,
                 Provider = input.Provider,
-                ElapsedMs = output?.ElapsedMs
+                ElapsedMs = output?.ElapsedMs,
+                ResponseJson = responseJson
             };
 
             await _sessionManager.RecordEventAsync(input.SessionId, evt, ct);

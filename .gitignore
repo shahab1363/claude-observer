@@ -31,10 +31,6 @@ packages/
 .DS_Store
 Thumbs.db
 
-# Python
-__pycache__/
-*.pyc
-
 # Runtime data
 *.log
 
