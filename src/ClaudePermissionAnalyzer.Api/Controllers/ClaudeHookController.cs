@@ -87,7 +87,7 @@ public class ClaudeHookController : ControllerBase
 
         try
         {
-            _logger.LogInformation("Claude hook {Event} for {Tool}", @event, input.ToolName ?? "unknown");
+            _logger.LogDebug("Claude hook {Event} for {Tool}", @event, input.ToolName ?? "unknown");
 
             var appConfig = _configManager.GetConfiguration();
             var isEnforced = _enforcementService.IsEnforced;

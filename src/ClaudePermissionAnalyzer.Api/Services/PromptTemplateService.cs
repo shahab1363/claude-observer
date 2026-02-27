@@ -20,7 +20,7 @@ public class PromptTemplateService
             try
             {
                 Directory.CreateDirectory(_promptsDir);
-                _logger.LogInformation("Created prompts directory: {PromptsDir}", _promptsDir);
+                _logger.LogDebug("Created prompts directory: {PromptsDir}", _promptsDir);
             }
             catch (Exception ex)
             {
@@ -90,7 +90,7 @@ public class PromptTemplateService
             var filePath = Path.Combine(_promptsDir, templateName);
             File.WriteAllText(filePath, content);
             _templateCache[templateName] = content;
-            _logger.LogInformation("Saved prompt template {TemplateName}", templateName);
+            _logger.LogDebug("Saved prompt template {TemplateName}", templateName);
             return true;
         }
         catch (Exception ex)
@@ -122,7 +122,7 @@ public class PromptTemplateService
                 }
             }
 
-            _logger.LogInformation("Loaded {Count} prompt templates from {Dir}", _templateCache.Count, _promptsDir);
+            _logger.LogDebug("Loaded {Count} prompt templates from {Dir}", _templateCache.Count, _promptsDir);
         }
         catch (Exception ex)
         {
@@ -147,7 +147,7 @@ public class PromptTemplateService
             _watcher.Created += OnTemplateFileChanged;
             _watcher.Deleted += OnTemplateFileDeleted;
 
-            _logger.LogInformation("Watching for prompt template changes in {Dir}", _promptsDir);
+            _logger.LogDebug("Watching for prompt template changes in {Dir}", _promptsDir);
         }
         catch (Exception ex)
         {
@@ -164,7 +164,7 @@ public class PromptTemplateService
             var content = File.ReadAllText(e.FullPath);
             var name = Path.GetFileName(e.FullPath);
             _templateCache[name] = content;
-            _logger.LogInformation("Prompt template updated: {TemplateName}", name);
+            _logger.LogDebug("Prompt template updated: {TemplateName}", name);
         }
         catch (Exception ex)
         {
@@ -176,6 +176,6 @@ public class PromptTemplateService
     {
         var name = Path.GetFileName(e.FullPath);
         _templateCache.TryRemove(name, out _);
-        _logger.LogInformation("Prompt template removed: {TemplateName}", name);
+        _logger.LogDebug("Prompt template removed: {TemplateName}", name);
     }
 }

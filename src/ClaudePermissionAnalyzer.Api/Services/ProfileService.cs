@@ -26,7 +26,7 @@ public class ProfileService
         {
             _activeProfileKey = key;
             _activeProfile = profile;
-            _logger?.LogInformation("Loaded permission profile: {Profile}", key);
+            _logger?.LogDebug("Loaded permission profile: {Profile}", key);
         }
     }
 
@@ -60,7 +60,7 @@ public class ProfileService
         config.Profiles.ActiveProfile = profileKey;
         await _configManager.SaveAsync();
 
-        _logger?.LogInformation("Switched to permission profile: {Profile}", profileKey);
+        _logger?.LogDebug("Switched to permission profile: {Profile}", profileKey);
         return true;
     }
 

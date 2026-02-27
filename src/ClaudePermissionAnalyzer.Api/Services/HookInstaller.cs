@@ -60,7 +60,7 @@ public class HookInstaller
     public void Install()
     {
         var appConfig = _configManager.GetConfiguration();
-        _logger.LogInformation("Syncing Claude hooks from app config ({Count} event types)", appConfig.HookHandlers.Count);
+        _logger.LogDebug("Syncing Claude hooks from app config ({Count} event types)", appConfig.HookHandlers.Count);
 
         var doc = LoadOrCreateSettingsDoc();
         var hooks = doc["hooks"]?.AsObject() ?? new JsonObject();
@@ -107,12 +107,12 @@ public class HookInstaller
         CleanupEmptyHooks(doc);
 
         File.WriteAllText(_settingsPath, doc.ToJsonString(s_writeOptions));
-        _logger.LogInformation("Claude hooks synced successfully");
+        _logger.LogDebug("Claude hooks synced successfully");
     }
 
     public void Uninstall()
     {
-        _logger.LogInformation("Uninstalling Claude hooks");
+        _logger.LogDebug("Uninstalling Claude hooks");
 
         if (!File.Exists(_settingsPath))
         {
@@ -133,7 +133,7 @@ public class HookInstaller
             CleanupEmptyHooks(doc);
 
             File.WriteAllText(_settingsPath, doc.ToJsonString(s_writeOptions));
-            _logger.LogInformation("Claude hooks uninstalled successfully");
+            _logger.LogDebug("Claude hooks uninstalled successfully");
         }
         catch (Exception ex)
         {

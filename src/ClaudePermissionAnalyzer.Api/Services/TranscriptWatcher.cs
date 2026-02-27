@@ -26,11 +26,11 @@ public class TranscriptWatcher : IDisposable
     {
         if (!Directory.Exists(_claudeProjectsDir))
         {
-            _logger.LogInformation("Claude projects directory not found at {Dir}, transcript watching disabled", _claudeProjectsDir);
+            _logger.LogDebug("Claude projects directory not found at {Dir}, transcript watching disabled", _claudeProjectsDir);
             return;
         }
 
-        _logger.LogInformation("Starting transcript watcher for {Dir}", _claudeProjectsDir);
+        _logger.LogDebug("Starting transcript watcher for {Dir}", _claudeProjectsDir);
 
         // Watch the top-level projects directory for new project folders
         try
