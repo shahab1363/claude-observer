@@ -818,7 +818,7 @@
                     if (entry.data.tool_name) parts.push('Tool: ' + entry.data.tool_name);
                     if (entry.data.command) parts.push('Command: ' + entry.data.command);
                     if (entry.data.status) parts.push('Status: ' + entry.data.status);
-                    if (entry.data.message) parts.push(entry.data.message);
+                    if (entry.data.message) parts.push(typeof entry.data.message === 'string' ? entry.data.message : JSON.stringify(entry.data.message, null, 2));
                     if (entry.data.content) parts.push(typeof entry.data.content === 'string' ? entry.data.content : JSON.stringify(entry.data.content));
                     if (parts.length > 0) return parts.join('\n');
                     return JSON.stringify(entry.data);

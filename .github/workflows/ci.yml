@@ -43,6 +43,8 @@ jobs:
             artifact: claude-observer-linux-x64
           - rid: osx-x64
             artifact: claude-observer-osx-x64
+          - rid: osx-arm64
+            artifact: claude-observer-osx-arm64
     steps:
       - uses: actions/checkout@v4
 
@@ -59,6 +61,9 @@ jobs:
             --runtime ${{ matrix.rid }} \
             --self-contained true \
             --output ./publish/${{ matrix.rid }}
+
+      - name: Include prompt templates
+        run: cp -r prompts ./publish/${{ matrix.rid }}/prompts
 
       - name: Package artifact
         run: |

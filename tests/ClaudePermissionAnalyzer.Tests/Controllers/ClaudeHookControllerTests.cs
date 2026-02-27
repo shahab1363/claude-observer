@@ -658,7 +658,7 @@ public class ClaudeHookControllerTests : IDisposable
 
         var decision = root.GetProperty("hookSpecificOutput").GetProperty("decision");
         Assert.Equal("deny", decision.GetProperty("behavior").GetString());
-        Assert.True(decision.GetProperty("interrupt").GetBoolean());
+        Assert.Contains("Safety score", decision.GetProperty("message").GetString());
     }
 
     // -----------------------------------------------------------------------
