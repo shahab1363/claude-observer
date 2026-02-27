@@ -30,7 +30,7 @@ public class AuditReportGenerator
         var totalDecisions = events.Count;
         var approved = events.Count(e => e.Decision == "auto-approved");
         var denied = events.Count(e => e.Decision == "denied");
-        var noHandler = events.Count(e => e.Decision == "no-handler");
+        var noHandler = events.Count(e => e.Decision == "logged" || e.Decision == "no-handler");
 
         var riskDistribution = events
             .Where(e => !string.IsNullOrEmpty(e.Category))

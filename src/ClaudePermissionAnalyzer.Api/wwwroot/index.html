@@ -60,6 +60,34 @@
                 </div>
             </section>
 
+            <!-- Enforcement Mode Selector -->
+            <section class="enforcement-section" id="enforcementSection">
+                <h2>Enforcement Mode</h2>
+                <div class="enforcement-track">
+                    <div class="enforcement-connector"><div class="enforcement-connector-fill" id="enforcementConnectorFill"></div></div>
+                    <div class="enforcement-modes">
+                        <div class="enforcement-mode-card" data-mode="observe" id="modeObserve">
+                            <div class="enforcement-mode-indicator"></div>
+                            <div class="enforcement-mode-icon">&#x1f441;</div>
+                            <div class="enforcement-mode-name">Observe</div>
+                            <div class="enforcement-mode-desc">Log only &mdash; no decisions. Claude asks the user as normal.</div>
+                        </div>
+                        <div class="enforcement-mode-card" data-mode="approve-only" id="modeApproveOnly">
+                            <div class="enforcement-mode-indicator"></div>
+                            <div class="enforcement-mode-icon">&#x2714;</div>
+                            <div class="enforcement-mode-name">Approve Only</div>
+                            <div class="enforcement-mode-desc">Auto-approve safe requests. Uncertain ones fall through to the user.</div>
+                        </div>
+                        <div class="enforcement-mode-card" data-mode="enforce" id="modeEnforce">
+                            <div class="enforcement-mode-indicator"></div>
+                            <div class="enforcement-mode-icon">&#x1f6e1;</div>
+                            <div class="enforcement-mode-name">Enforce</div>
+                            <div class="enforcement-mode-desc">Full control &mdash; approve safe requests, deny dangerous ones.</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
             <!-- Hooks Management -->
             <section class="hooks-section">
                 <h2>Hook Management</h2>
@@ -71,14 +99,6 @@
                         </div>
                         <p class="hook-control-desc">Install/remove hooks in Claude Code's settings.json</p>
                         <button class="btn" id="btnToggleHooks" disabled>Loading...</button>
-                    </div>
-                    <div class="hook-control-card">
-                        <div class="hook-control-header">
-                            <span class="hook-control-label">Enforcement Mode</span>
-                            <span class="hook-status-badge" id="hookEnforcedBadge">Checking...</span>
-                        </div>
-                        <p class="hook-control-desc">When off, hooks observe only. When on, hooks approve/deny.</p>
-                        <button class="btn" id="btnToggleEnforce" disabled>Loading...</button>
                     </div>
                     <div class="hook-control-card copilot-card">
                         <div class="hook-control-header">

@@ -381,38 +381,73 @@ function highlightProfile(key) {
 }
 
 // ---- Hooks Management ----
+var currentEnforcementMode = 'observe';
+
 async function loadHooksStatus() {
     try {
         var data = await fetchApi('/api/hooks/status');
-        updateHooksUI(data.installed, data.enforced);
+        var mode = data.enforcementMode || (data.enforced ? 'enforce' : 'observe');
+        currentEnforcementMode = mode;
+        updateHooksUI(data.installed);
+        updateEnforcementModeUI(mode);
         updateCopilotHooksUI(data.copilot);
     } catch {
         // Service may not support hooks endpoint yet
     }
 }
 
-function updateHooksUI(installed, enforced) {
+function updateHooksUI(installed) {
     var installedBadge = document.getElementById('hookInstalledBadge');
-    var enforcedBadge = document.getElementById('hookEnforcedBadge');
     var btnToggleHooks = document.getElementById('btnToggleHooks');
-    var btnToggleEnforce = document.getElementById('btnToggleEnforce');
 
     if (installedBadge) {
         installedBadge.textContent = installed ? 'Installed' : 'Not Installed';
         installedBadge.className = 'hook-status-badge ' + (installed ? 'badge-success' : 'badge-neutral');
     }
-    if (enforcedBadge) {
-        enforcedBadge.textContent = enforced ? 'Enforcing' : 'Observe Only';
-        enforcedBadge.className = 'hook-status-badge ' + (enforced ? 'badge-warning' : 'badge-success');
-    }
     if (btnToggleHooks) {
         btnToggleHooks.textContent = installed ? 'Uninstall Hooks' : 'Install Hooks';
         btnToggleHooks.disabled = false;
     }
-    if (btnToggleEnforce) {
-        btnToggleEnforce.textContent = enforced ? 'Switch to Observe' : 'Enable Enforcement';
-        btnToggleEnforce.disabled = false;
+}
+
+function updateEnforcementModeUI(mode) {
+    var cards = document.querySelectorAll('.enforcement-mode-card');
+    cards.forEach(function (card) {
+        card.classList.remove('active', 'switching');
+    });
+    var activeCard = document.querySelector('.enforcement-mode-card[data-mode="' + mode + '"]');
+    if (activeCard) activeCard.classList.add('active');
+
+    // Update connector fill to show progress
+    var fill = document.getElementById('enforcementConnectorFill');
+    if (fill) {
+        var fillPct = { 'observe': '0', 'approve-only': '50', 'enforce': '100' };
+        fill.style.width = (fillPct[mode] || '0') + '%';
     }
+}
+
+function initEnforcementModeCards() {
+    var cards = document.querySelectorAll('.enforcement-mode-card');
+    cards.forEach(function (card) {
+        card.addEventListener('click', function () {
+            var targetMode = this.getAttribute('data-mode');
+            if (targetMode === currentEnforcementMode) return;
+
+            // Visual feedback: mark all cards as switching
+            cards.forEach(function (c) { c.classList.add('switching'); });
+
+            fetchApi('/api/hooks/enforce?mode=' + encodeURIComponent(targetMode), { method: 'POST' })
+                .then(function (data) {
+                    currentEnforcementMode = data.enforcementMode;
+                    updateEnforcementModeUI(data.enforcementMode);
+                    Toast.show('Enforcement Mode', data.message, 'success');
+                })
+                .catch(function (err) {
+                    Toast.show('Mode Error', 'Failed: ' + err.message, 'danger');
+                    cards.forEach(function (c) { c.classList.remove('switching'); });
+                });
+        });
+    });
 }
 
 function updateCopilotHooksUI(copilotStatus) {
@@ -438,7 +473,6 @@ function updateCopilotHooksUI(copilotStatus) {
 
 function initHooksControls() {
     var btnToggleHooks = document.getElementById('btnToggleHooks');
-    var btnToggleEnforce = document.getElementById('btnToggleEnforce');
 
     if (btnToggleHooks) {
         btnToggleHooks.addEventListener('click', function () {
@@ -453,21 +487,6 @@ function initHooksControls() {
                 .catch(function (err) {
                     Toast.show('Hooks Error', 'Failed: ' + err.message, 'danger');
                     btnToggleHooks.disabled = false;
-                });
-        });
-    }
-
-    if (btnToggleEnforce) {
-        btnToggleEnforce.addEventListener('click', function () {
-            btnToggleEnforce.disabled = true;
-            fetchApi('/api/hooks/enforce', { method: 'POST' })
-                .then(function (data) {
-                    Toast.show('Enforcement', data.message, 'success');
-                    loadHooksStatus();
-                })
-                .catch(function (err) {
-                    Toast.show('Enforcement Error', 'Failed: ' + err.message, 'danger');
-                    btnToggleEnforce.disabled = false;
                 });
         });
     }
@@ -521,6 +540,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initProfileSwitcher();
     initQuickActions();
     initHooksControls();
+    initEnforcementModeCards();
 
     // Load all data
     refreshData();

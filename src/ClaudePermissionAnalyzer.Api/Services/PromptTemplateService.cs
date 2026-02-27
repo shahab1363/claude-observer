@@ -37,6 +37,9 @@ public class PromptTemplateService
         if (string.IsNullOrEmpty(templateName))
             return null;
 
+        // Normalize: strip directory path so full-path configs resolve to filename-only keys
+        templateName = Path.GetFileName(templateName);
+
         // Normalize: ensure .txt extension
         if (!templateName.EndsWith(".txt", StringComparison.OrdinalIgnoreCase))
             templateName += ".txt";

@@ -264,7 +264,9 @@ function getDecisionClass(decision) {
     switch (decision) {
         case 'auto-approved': return 'approved';
         case 'denied': return 'denied';
-        default: return 'no-handler';
+        case 'logged':
+        case 'no-handler': return 'logged';
+        default: return 'logged';
     }
 }
 
@@ -272,6 +274,7 @@ function getDecisionLabel(decision) {
     switch (decision) {
         case 'auto-approved': return 'Approved';
         case 'denied': return 'Denied';
+        case 'logged':
         case 'no-handler': return 'Logged';
         default: return decision || 'Unknown';
     }

@@ -284,7 +284,7 @@ public class CopilotHookController : ControllerBase
         {
             var decision = output switch
             {
-                null => "no-handler",
+                null => "logged",
                 { AutoApprove: true } => "auto-approved",
                 _ => "denied"
             };

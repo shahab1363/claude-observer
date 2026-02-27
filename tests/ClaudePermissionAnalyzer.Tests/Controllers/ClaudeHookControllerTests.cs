@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using System.Net.Http;
 using System.Text.Json;
 using Xunit;
 
@@ -70,6 +71,11 @@ public class ClaudeHookControllerTests : IDisposable
 
         _mockLogger = new Mock<ILogger<ClaudeHookController>>();
 
+        var mockHttpClientFactory = new Mock<IHttpClientFactory>();
+        mockHttpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient());
+        var triggerService = new TriggerService(
+            _configManager, mockHttpClientFactory.Object, NullLogger<TriggerService>.Instance);
+
         _controller = new ClaudeHookController(
             _configManager,
             _sessionManager,
@@ -77,6 +83,7 @@ public class ClaudeHookControllerTests : IDisposable
             _mockProfileService.Object,
             _adaptiveService,
             _enforcementService,
+            triggerService,
             new ConsoleStatusService(_enforcementService),
             _mockLogger.Object);
     }
@@ -104,6 +111,11 @@ public class ClaudeHookControllerTests : IDisposable
         var enforcementSvc = new EnforcementService(
             configMgr, NullLogger<EnforcementService>.Instance);
 
+        var mockHttpClientFactory = new Mock<IHttpClientFactory>();
+        mockHttpClientFactory.Setup(f => f.CreateClient(It.IsAny<string>())).Returns(new HttpClient());
+        var triggerSvc = new TriggerService(
+            configMgr, mockHttpClientFactory.Object, NullLogger<TriggerService>.Instance);
+
         return new ClaudeHookController(
             configMgr,
             _sessionManager,
@@ -111,6 +123,7 @@ public class ClaudeHookControllerTests : IDisposable
             _mockProfileService.Object,
             _adaptiveService,
             enforcementSvc,
+            triggerSvc,
             new ConsoleStatusService(enforcementSvc),
             _mockLogger.Object);
     }

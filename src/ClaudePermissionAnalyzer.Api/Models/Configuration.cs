@@ -13,12 +13,20 @@ public class Configuration
     public bool EnforcementEnabled { get; set; } = false;
 
     /// <summary>
+    /// Three-state enforcement mode: "observe", "approve-only", "enforce".
+    /// When set, takes precedence over EnforcementEnabled bool.
+    /// </summary>
+    public string? EnforcementMode { get; set; }
+
+    /// <summary>
     /// When true, LLM analysis runs even in observe mode (so you see scores in logs).
     /// When false, observe mode skips LLM calls entirely (just logs events).
     /// </summary>
     public bool AnalyzeInObserveMode { get; set; } = true;
 
     public CopilotConfig Copilot { get; set; } = new();
+
+    public TriggerConfig Triggers { get; set; } = new();
 }
 
 public class CopilotConfig
@@ -104,4 +112,25 @@ public class SecurityConfig
 {
     public string? ApiKey { get; set; }
     public int RateLimitPerMinute { get; set; } = 600;
+}
+
+public class TriggerConfig
+{
+    public bool Enabled { get; set; } = false;
+    public List<TriggerRule> Rules { get; set; } = new();
+}
+
+public class TriggerRule
+{
+    /// <summary>Human-readable name for this trigger rule.</summary>
+    public string Name { get; set; } = "";
+
+    /// <summary>Event to match: "auto-approved", "denied", "logged", "dangerous", or "*" for all.</summary>
+    public string Event { get; set; } = "*";
+
+    /// <summary>URL to POST the trigger payload to.</summary>
+    public string Url { get; set; } = "";
+
+    /// <summary>HTTP method (default POST).</summary>
+    public string Method { get; set; } = "POST";
 }

@@ -83,6 +83,7 @@ catch (Exception ex)
 if (enforceMode)
 {
     config.EnforcementEnabled = true;
+    config.EnforcementMode = "enforce";
 }
 
 // Validate server host - must be localhost/loopback only
@@ -189,6 +190,9 @@ builder.Services.AddSingleton<CopilotHookInstaller>(sp =>
 var appUrl = $"http://{config.Server.Host}:{config.Server.Port}";
 builder.Services.AddSingleton<ConsoleStatusService>();
 
+// Event trigger service for webhooks
+builder.Services.AddSingleton<TriggerService>();
+
 // Add OpenAPI/Swagger documentation
 builder.Services.AddOpenApi();
 
@@ -253,7 +257,7 @@ if (installCopilotHooks)
 if (enforceMode)
 {
     var enforcementService = app.Services.GetRequiredService<EnforcementService>();
-    await enforcementService.SetEnforcedAsync(true);
+    await enforcementService.SetModeAsync("enforce");
 }
 
 // Ensure services are disposed on shutdown
@@ -376,7 +380,9 @@ app.UseCors();
 app.UseAuthorization();
 app.MapControllers();
 
-var modeLabel = config.EnforcementEnabled ? "ENFORCE" : "OBSERVE";
+// Resolve mode label for banner
+var resolvedMode = !string.IsNullOrEmpty(config.EnforcementMode) ? config.EnforcementMode : (config.EnforcementEnabled ? "enforce" : "observe");
+var modeLabel = resolvedMode.ToUpperInvariant();
 Console.WriteLine($"  Claude Observer | {modeLabel} mode | {appUrl}");
 Console.WriteLine($"  Hooks: {(hooksInstalledThisSession ? "installed" : "skipped")} | Dashboard: {appUrl}");
 Console.WriteLine($"  Press Ctrl+C to stop (hooks will be auto-removed)");

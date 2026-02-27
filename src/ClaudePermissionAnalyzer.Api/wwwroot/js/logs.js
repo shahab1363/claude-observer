@@ -10,7 +10,7 @@ var chipDefinitions = {
     hookType: ['PermissionRequest', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'UserPromptSubmit', 'Stop'],
     toolName: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task'],
     category: ['safe', 'cautious', 'risky', 'dangerous'],
-    decision: ['auto-approved', 'denied', 'no-handler']
+    decision: ['auto-approved', 'denied', 'logged']
 };
 
 var activeChipFilters = {};
@@ -86,8 +86,10 @@ function saveChipState(group) {
 function getChipFilterParam(group) {
     var active = activeChipFilters[group];
     var all = chipDefinitions[group];
-    // If all or none selected, send no filter (show everything)
-    if (!active || active.size === 0 || active.size === all.length) return '';
+    // All selected = no filter (show everything)
+    if (!active || active.size === all.length) return '';
+    // None selected = match nothing (hide all)
+    if (active.size === 0) return '__none__';
     return Array.from(active).join(',');
 }
 

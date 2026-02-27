@@ -31,6 +31,7 @@ public class HooksController : ControllerBase
         {
             installed = _hookInstaller.IsInstalled(),
             enforced = _enforcementService.IsEnforced,
+            enforcementMode = _enforcementService.Mode,
             copilot = new
             {
                 userInstalled = _copilotHookInstaller.IsUserInstalled()
@@ -39,16 +40,35 @@ public class HooksController : ControllerBase
     }
 
     [HttpPost("enforce")]
-    public async Task<IActionResult> ToggleEnforcement()
+    public async Task<IActionResult> ToggleEnforcement([FromQuery] string? mode = null)
     {
-        await _enforcementService.ToggleAsync();
-        _logger.LogInformation("Enforcement toggled to {State}", _enforcementService.IsEnforced);
+        if (!string.IsNullOrEmpty(mode))
+        {
+            if (!EnforcementService.ValidModes.Contains(mode))
+                return BadRequest(new { error = $"Invalid mode: {mode}. Valid: {string.Join(", ", EnforcementService.ValidModes)}" });
+            await _enforcementService.SetModeAsync(mode);
+        }
+        else
+        {
+            await _enforcementService.CycleModeAsync();
+        }
+
+        var currentMode = _enforcementService.Mode;
+        _logger.LogInformation("Enforcement mode set to {Mode}", currentMode);
+
+        var message = currentMode switch
+        {
+            "observe" => "Observe-only mode - hooks log but do not decide",
+            "approve-only" => "Approve-only mode - safe requests auto-approved, uncertain ones fall through to user",
+            "enforce" => "Full enforcement - hooks return approve/deny decisions",
+            _ => $"Mode: {currentMode}"
+        };
+
         return Ok(new
         {
             enforced = _enforcementService.IsEnforced,
-            message = _enforcementService.IsEnforced
-                ? "Enforcement enabled - hooks will return approve/deny decisions"
-                : "Observe-only mode - hooks will log but not decide"
+            enforcementMode = currentMode,
+            message
         });
     }
 

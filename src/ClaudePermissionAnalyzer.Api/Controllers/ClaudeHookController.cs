@@ -21,6 +21,7 @@ public class ClaudeHookController : ControllerBase
     private readonly ProfileService _profileService;
     private readonly AdaptiveThresholdService _adaptiveService;
     private readonly EnforcementService _enforcementService;
+    private readonly TriggerService _triggerService;
     private readonly ConsoleStatusService _consoleStatus;
     private readonly ILogger<ClaudeHookController> _logger;
 
@@ -31,6 +32,7 @@ public class ClaudeHookController : ControllerBase
         ProfileService profileService,
         AdaptiveThresholdService adaptiveService,
         EnforcementService enforcementService,
+        TriggerService triggerService,
         ConsoleStatusService consoleStatus,
         ILogger<ClaudeHookController> logger)
     {
@@ -40,6 +42,7 @@ public class ClaudeHookController : ControllerBase
         _profileService = profileService;
         _adaptiveService = adaptiveService;
         _enforcementService = enforcementService;
+        _triggerService = triggerService;
         _consoleStatus = consoleStatus;
         _logger = logger;
     }
@@ -90,10 +93,10 @@ public class ClaudeHookController : ControllerBase
             _logger.LogDebug("Claude hook {Event} for {Tool}", @event, input.ToolName ?? "unknown");
 
             var appConfig = _configManager.GetConfiguration();
-            var isEnforced = _enforcementService.IsEnforced;
+            var mode = _enforcementService.Mode;
 
-            // If not enforced AND analysis disabled in observe mode, just log
-            if (!isEnforced && !appConfig.AnalyzeInObserveMode)
+            // If observe mode AND analysis disabled, just log
+            if (mode == "observe" && !appConfig.AnalyzeInObserveMode)
             {
                 await TryLogEventAsync(input, null, null, cancellationToken);
                 return Content("{}", "application/json");
@@ -142,18 +145,32 @@ public class ClaudeHookController : ControllerBase
             // Log the event (with full analysis results regardless of enforcement)
             await TryLogEventAsync(input, output, handler, cancellationToken);
 
-            // If enforcement is OFF, return empty JSON (Claude asks user as normal)
-            // but the analysis was still logged above for visibility
-            if (!isEnforced)
+            // Decision logic based on 3-state enforcement mode
+            switch (mode)
             {
-                _logger.LogDebug("Observe mode - analyzed {Tool} (score={Score}) but not enforcing",
-                    input.ToolName, output.SafetyScore);
-                return Content("{}", "application/json");
-            }
+                case "observe":
+                    // Log only, never return a decision
+                    _logger.LogDebug("Observe mode - analyzed {Tool} (score={Score}) but not enforcing",
+                        input.ToolName, output.SafetyScore);
+                    return Content("{}", "application/json");
 
-            // Enforcement ON — return the actual decision to Claude
-            var claudeResponse = FormatClaudeResponse(@event, output);
-            return Content(JsonSerializer.Serialize(claudeResponse), "application/json");
+                case "approve-only":
+                    // Auto-approve safe requests, fall through on anything uncertain/denied
+                    if (output.AutoApprove)
+                    {
+                        var approveResponse = FormatClaudeResponse(@event, output);
+                        return Content(JsonSerializer.Serialize(approveResponse), "application/json");
+                    }
+                    _logger.LogDebug("Approve-only mode - {Tool} not safe enough (score={Score}), falling through to user",
+                        input.ToolName, output.SafetyScore);
+                    return Content("{}", "application/json");
+
+                case "enforce":
+                default:
+                    // Full enforcement: return approve or deny
+                    var enforceResponse = FormatClaudeResponse(@event, output);
+                    return Content(JsonSerializer.Serialize(enforceResponse), "application/json");
+            }
         }
         catch (OperationCanceledException)
         {
@@ -291,7 +308,7 @@ public class ClaudeHookController : ControllerBase
         {
             var decision = output switch
             {
-                null => "no-handler",
+                null => "logged",
                 { AutoApprove: true } => "auto-approved",
                 _ => "denied"
             };
@@ -322,6 +339,9 @@ public class ClaudeHookController : ControllerBase
             };
 
             await _sessionManager.RecordEventAsync(input.SessionId, evt, ct);
+
+            // Fire event triggers (fire-and-forget)
+            _triggerService.FireAsync(decision, output?.Category, evt);
 
             // Update console status line
             _consoleStatus.RecordEvent(decision, input.ToolName, output?.SafetyScore, output?.ElapsedMs);

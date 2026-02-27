@@ -75,7 +75,7 @@ public class ConsoleStatusService : IDisposable
         var passthrough = Interlocked.Read(ref _passthrough);
         var scored = Interlocked.Read(ref _scoredEvents);
         var avgScore = scored > 0 ? Interlocked.Read(ref _totalScore) / scored : 0;
-        var mode = _enforcementService.IsEnforced ? "ENFORCE" : "OBSERVE";
+        var mode = _enforcementService.Mode.ToUpperInvariant();
 
         // Build tool breakdown pairs
         KeyValuePair<string, long>[] tools;

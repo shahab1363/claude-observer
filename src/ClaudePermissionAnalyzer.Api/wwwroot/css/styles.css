@@ -346,6 +346,180 @@ nav a:focus-visible {
     color: var(--text-secondary);
 }
 
+.badge-info {
+    background: rgba(59, 130, 246, 0.15);
+    color: #3b82f6;
+}
+
+/* ==========================================================================
+   Enforcement Mode Selector
+   ========================================================================== */
+.enforcement-section {
+    background: var(--bg-secondary);
+    padding: 24px;
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    border: 1px solid var(--border-light);
+    margin-bottom: 20px;
+}
+
+.enforcement-section h2 {
+    font-size: 18px;
+    margin-bottom: 20px;
+    color: var(--text-primary);
+}
+
+.enforcement-track {
+    position: relative;
+}
+
+/* Horizontal connector line behind the cards */
+.enforcement-connector {
+    position: absolute;
+    top: 38px;
+    left: calc(16.66%);
+    right: calc(16.66%);
+    height: 3px;
+    background: var(--border-color);
+    border-radius: 2px;
+    z-index: 0;
+}
+
+.enforcement-connector-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent-primary);
+    transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    width: 0%;
+}
+
+.enforcement-modes {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    position: relative;
+    z-index: 1;
+}
+
+.enforcement-mode-card {
+    padding: 20px 16px 16px;
+    border-radius: var(--radius-md);
+    border: 2px solid var(--border-color);
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: var(--bg-tertiary);
+    position: relative;
+}
+
+.enforcement-mode-card:hover {
+    border-color: var(--text-muted);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+/* Top indicator dot */
+.enforcement-mode-indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--border-color);
+    background: var(--bg-secondary);
+    margin: 0 auto 14px;
+    transition: all 0.3s ease;
+}
+
+.enforcement-mode-icon {
+    font-size: 32px;
+    margin-bottom: 10px;
+    line-height: 1;
+    filter: grayscale(0.5);
+    transition: filter 0.3s ease;
+}
+
+.enforcement-mode-name {
+    font-weight: 700;
+    font-size: 15px;
+    margin-bottom: 6px;
+    color: var(--text-primary);
+    letter-spacing: 0.02em;
+}
+
+.enforcement-mode-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+/* Active states per mode */
+.enforcement-mode-card.active {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+}
+
+.enforcement-mode-card.active .enforcement-mode-icon {
+    filter: grayscale(0);
+}
+
+.enforcement-mode-card.active .enforcement-mode-indicator {
+    border-width: 3px;
+    box-shadow: 0 0 0 3px rgba(0,0,0,0.05);
+}
+
+/* Observe active */
+.enforcement-mode-card[data-mode="observe"].active {
+    border-color: var(--color-success);
+    background: var(--color-success-bg);
+}
+.enforcement-mode-card[data-mode="observe"].active .enforcement-mode-indicator {
+    border-color: var(--color-success);
+    background: var(--color-success);
+}
+.enforcement-mode-card[data-mode="observe"].active .enforcement-mode-name {
+    color: var(--color-success);
+}
+
+/* Approve-only active */
+.enforcement-mode-card[data-mode="approve-only"].active {
+    border-color: var(--color-info);
+    background: var(--color-info-bg);
+}
+.enforcement-mode-card[data-mode="approve-only"].active .enforcement-mode-indicator {
+    border-color: var(--color-info);
+    background: var(--color-info);
+}
+.enforcement-mode-card[data-mode="approve-only"].active .enforcement-mode-name {
+    color: var(--color-info);
+}
+
+/* Enforce active */
+.enforcement-mode-card[data-mode="enforce"].active {
+    border-color: var(--color-warning);
+    background: var(--color-warning-bg);
+}
+.enforcement-mode-card[data-mode="enforce"].active .enforcement-mode-indicator {
+    border-color: var(--color-warning);
+    background: var(--color-warning);
+}
+.enforcement-mode-card[data-mode="enforce"].active .enforcement-mode-name {
+    color: var(--color-warning);
+}
+
+/* Switching animation */
+.enforcement-mode-card.switching {
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+@media (max-width: 640px) {
+    .enforcement-modes {
+        grid-template-columns: 1fr;
+    }
+    .enforcement-connector {
+        display: none;
+    }
+}
+
 .hook-control-desc {
     font-size: 13px;
     color: var(--text-secondary);
@@ -884,7 +1058,8 @@ nav a:focus-visible {
     border-left-color: var(--color-warning);
 }
 
-.activity-item.no-handler {
+.activity-item.no-handler,
+.activity-item.logged {
     border-left-color: var(--text-faint);
 }
 
@@ -921,7 +1096,8 @@ nav a:focus-visible {
     background: var(--color-danger-bg);
 }
 
-.activity-decision.no-handler {
+.activity-decision.no-handler,
+.activity-decision.logged {
     color: var(--text-muted);
     background: var(--bg-hover);
 }
@@ -1254,7 +1430,8 @@ nav a:focus-visible {
     background: var(--color-danger-bg);
 }
 
-.log-decision.no-handler {
+.log-decision.no-handler,
+.log-decision.logged {
     color: var(--text-muted);
     background: var(--bg-hover);
 }

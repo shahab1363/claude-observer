@@ -89,47 +89,53 @@ public class EnforcementServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task ToggleAsync_FlipsStateFromFalseToTrue()
+    public async Task ToggleAsync_CyclesFromObserveToApproveOnly()
     {
         // Arrange
         var (service, _) = CreateService(enforcementEnabled: false);
-        Assert.False(service.IsEnforced);
+        Assert.Equal("observe", service.Mode);
 
         // Act
         await service.ToggleAsync();
 
-        // Assert
-        Assert.True(service.IsEnforced);
+        // Assert - observe -> approve-only
+        Assert.Equal("approve-only", service.Mode);
+        Assert.False(service.IsEnforced);
     }
 
     [Fact]
-    public async Task ToggleAsync_FlipsStateFromTrueToFalse()
+    public async Task ToggleAsync_CyclesFromEnforceToObserve()
     {
         // Arrange
         var (service, _) = CreateService(enforcementEnabled: true);
-        Assert.True(service.IsEnforced);
+        Assert.Equal("enforce", service.Mode);
 
         // Act
         await service.ToggleAsync();
 
-        // Assert
+        // Assert - enforce -> observe
+        Assert.Equal("observe", service.Mode);
         Assert.False(service.IsEnforced);
     }
 
     [Fact]
-    public async Task ToggleAsync_Twice_ReturnsToOriginalState()
+    public async Task ToggleAsync_ThreeTimes_CyclesBackToOriginal()
     {
         // Arrange
         var (service, _) = CreateService(enforcementEnabled: false);
-        Assert.False(service.IsEnforced);
+        Assert.Equal("observe", service.Mode);
 
-        // Act
-        await service.ToggleAsync();
-        Assert.True(service.IsEnforced);
+        // Act - cycle through all 3 modes
+        await service.ToggleAsync(); // observe -> approve-only
+        Assert.Equal("approve-only", service.Mode);
 
-        await service.ToggleAsync();
+        await service.ToggleAsync(); // approve-only -> enforce
+        Assert.Equal("enforce", service.Mode);
+
+        await service.ToggleAsync(); // enforce -> observe
 
         // Assert
+        Assert.Equal("observe", service.Mode);
         Assert.False(service.IsEnforced);
     }
 
@@ -167,12 +173,13 @@ public class EnforcementServiceTests : IDisposable
         // Arrange
         var (service, configManager) = CreateService(enforcementEnabled: false);
 
-        // Act
+        // Act - observe -> approve-only
         await service.ToggleAsync();
 
         // Assert
         var config = configManager.GetConfiguration();
-        Assert.True(config.EnforcementEnabled);
+        Assert.Equal("approve-only", config.EnforcementMode);
+        Assert.False(config.EnforcementEnabled); // bool stays in sync: approve-only is not "enforce"
     }
 
     [Fact]
