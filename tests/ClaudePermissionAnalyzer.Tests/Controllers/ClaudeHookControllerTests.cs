@@ -77,6 +77,7 @@ public class ClaudeHookControllerTests : IDisposable
             _mockProfileService.Object,
             _adaptiveService,
             _enforcementService,
+            new ConsoleStatusService("TEST", "http://localhost:5050"),
             _mockLogger.Object);
     }
 
@@ -110,6 +111,7 @@ public class ClaudeHookControllerTests : IDisposable
             _mockProfileService.Object,
             _adaptiveService,
             enforcementSvc,
+            new ConsoleStatusService("TEST", "http://localhost:5050"),
             _mockLogger.Object);
     }
 

@@ -21,6 +21,7 @@ public class ClaudeHookController : ControllerBase
     private readonly ProfileService _profileService;
     private readonly AdaptiveThresholdService _adaptiveService;
     private readonly EnforcementService _enforcementService;
+    private readonly ConsoleStatusService _consoleStatus;
     private readonly ILogger<ClaudeHookController> _logger;
 
     public ClaudeHookController(
@@ -30,6 +31,7 @@ public class ClaudeHookController : ControllerBase
         ProfileService profileService,
         AdaptiveThresholdService adaptiveService,
         EnforcementService enforcementService,
+        ConsoleStatusService consoleStatus,
         ILogger<ClaudeHookController> logger)
     {
         _configManager = configManager;
@@ -38,6 +40,7 @@ public class ClaudeHookController : ControllerBase
         _profileService = profileService;
         _adaptiveService = adaptiveService;
         _enforcementService = enforcementService;
+        _consoleStatus = consoleStatus;
         _logger = logger;
     }
 
@@ -319,6 +322,9 @@ public class ClaudeHookController : ControllerBase
             };
 
             await _sessionManager.RecordEventAsync(input.SessionId, evt, ct);
+
+            // Update console status line
+            _consoleStatus.RecordEvent(decision, input.ToolName, output?.SafetyScore, output?.ElapsedMs);
 
             if (output != null && !string.IsNullOrEmpty(input.ToolName))
             {

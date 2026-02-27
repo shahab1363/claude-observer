@@ -185,6 +185,11 @@ builder.Services.AddSingleton<CopilotHookInstaller>(sp =>
         sp.GetRequiredService<ILogger<CopilotHookInstaller>>(),
         $"http://{config.Server.Host}:{config.Server.Port}"));
 
+// Console status line for aggregated stats
+var modeLabel = config.EnforcementEnabled ? "ENFORCE" : "OBSERVE";
+var appUrl = $"http://{config.Server.Host}:{config.Server.Port}";
+builder.Services.AddSingleton(new ConsoleStatusService(modeLabel, appUrl));
+
 // Add OpenAPI/Swagger documentation
 builder.Services.AddOpenApi();
 
@@ -221,70 +226,28 @@ await profileService.InitializeAsync();
 var adaptiveService = app.Services.GetRequiredService<AdaptiveThresholdService>();
 await adaptiveService.LoadAsync();
 
-// ---- Hook installation logic ----
+// ---- Hook installation ----
 var hookInstaller = app.Services.GetRequiredService<HookInstaller>();
 var copilotHookInstaller = app.Services.GetRequiredService<CopilotHookInstaller>();
 bool hooksInstalledThisSession = false;
 bool copilotHooksInstalledThisSession = false;
 
-if (installHooks)
+// Always install Claude hooks unless --no-hooks is specified.
+// Users can manage hooks from the dashboard. Hooks are always removed on shutdown.
+if (!noHooks)
 {
     hookInstaller.Install();
     hooksInstalledThisSession = true;
-    Console.WriteLine("Claude hooks installed.");
-}
-else if (!noHooks)
-{
-    // Interactive prompt - only if running with a console
-    if (Environment.UserInteractive && !Console.IsInputRedirected)
-    {
-        Console.Write("Install Claude hooks? [y/N]: ");
-        var response = Console.ReadLine()?.Trim().ToLowerInvariant();
-        if (response == "y" || response == "yes")
-        {
-            hookInstaller.Install();
-            hooksInstalledThisSession = true;
-            Console.WriteLine("Claude hooks installed.");
-        }
-        else
-        {
-            Console.WriteLine("Skipping Claude hook installation. Use --install-hooks to install later.");
-        }
-    }
 }
 
-// Copilot hook installation
+// Copilot hooks only via explicit CLI flag
 if (installCopilotHooks)
 {
     if (!string.IsNullOrEmpty(copilotRepoPath))
-    {
         copilotHookInstaller.InstallRepo(copilotRepoPath);
-        Console.WriteLine($"Copilot hooks installed at repo level: {copilotRepoPath}");
-    }
     else
-    {
         copilotHookInstaller.InstallUser();
-        Console.WriteLine("Copilot hooks installed at user level.");
-    }
     copilotHooksInstalledThisSession = true;
-}
-else if (!noHooks && !installHooks)
-{
-    if (Environment.UserInteractive && !Console.IsInputRedirected)
-    {
-        Console.Write("Install Copilot CLI hooks? [y/N]: ");
-        var copilotResponse = Console.ReadLine()?.Trim().ToLowerInvariant();
-        if (copilotResponse == "y" || copilotResponse == "yes")
-        {
-            copilotHookInstaller.InstallUser();
-            copilotHooksInstalledThisSession = true;
-            Console.WriteLine("Copilot hooks installed at user level.");
-        }
-        else
-        {
-            Console.WriteLine("Skipping Copilot hook installation. Use --install-copilot-hooks to install later.");
-        }
-    }
 }
 
 // Apply enforcement mode from CLI
@@ -292,7 +255,6 @@ if (enforceMode)
 {
     var enforcementService = app.Services.GetRequiredService<EnforcementService>();
     await enforcementService.SetEnforcedAsync(true);
-    Console.WriteLine("Enforcement mode enabled - hooks will return approve/deny decisions.");
 }
 
 // Ensure services are disposed on shutdown
@@ -367,7 +329,6 @@ lifetime.ApplicationStopping.Register(() =>
 });
 
 // Auto-launch browser after the server starts
-var appUrl = $"http://{config.Server.Host}:{config.Server.Port}";
 lifetime.ApplicationStarted.Register(() =>
 {
     try
@@ -376,8 +337,7 @@ lifetime.ApplicationStarted.Register(() =>
     }
     catch
     {
-        // Non-fatal - user can navigate manually
-        Console.WriteLine($"Dashboard available at: {appUrl}");
+        // Non-fatal - URL already printed in startup banner
     }
 });
 
@@ -417,7 +377,9 @@ app.UseCors();
 app.UseAuthorization();
 app.MapControllers();
 
-var modeLabel = config.EnforcementEnabled ? "ENFORCE" : "OBSERVE";
-Console.WriteLine($"Claude Permission Analyzer starting in {modeLabel} mode at {appUrl}");
+Console.WriteLine($"  Claude Observer | {modeLabel} mode | {appUrl}");
+Console.WriteLine($"  Hooks: {(hooksInstalledThisSession ? "installed" : "skipped")} | Dashboard: {appUrl}");
+Console.WriteLine($"  Press Ctrl+C to stop (hooks will be auto-removed)");
+Console.WriteLine();
 
 app.Run(appUrl);
