@@ -3054,25 +3054,6 @@ body.terminal-open {
     font-weight: 400;
 }
 
-/* Diff rendering (Edit tool) */
-.diff-container {
-    font-family: var(--font-mono);
-    font-size: 0.82em;
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
-    margin: 4px 0;
-}
-.diff-line {
-    padding: 1px 8px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    line-height: 1.5;
-}
-.diff-line.diff-added { background: var(--diff-added-bg); color: var(--diff-added-text); }
-.diff-line.diff-removed { background: var(--diff-removed-bg); color: var(--diff-removed-text); }
-.diff-line.diff-context { color: var(--text-muted); }
-
 /* Write tool preview */
 .write-preview {
     font-family: var(--font-mono);

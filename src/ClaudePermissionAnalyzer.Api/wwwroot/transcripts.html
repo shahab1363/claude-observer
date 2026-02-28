@@ -89,6 +89,24 @@
         .tool-name-badge { font-weight: 700; display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 0.8em; background: var(--accent-primary, #2563eb); color: #fff; margin-right: 6px; }
         .tool-result-block { font-family: monospace; font-size: 0.85em; background: var(--bg-tertiary, #f3f4f6); padding: 8px 12px; border-radius: 4px; margin-top: 4px; white-space: pre-wrap; word-break: break-word; max-height: 300px; overflow-y: auto; }
 
+        .diff-table { width: 100%; border-collapse: collapse; font-family: monospace; font-size: 0.85em; margin-top: 6px; table-layout: fixed; }
+        .diff-table td { padding: 1px 8px; white-space: pre-wrap; word-break: break-word; vertical-align: top; border: none; }
+        .diff-line-num { width: 40px; min-width: 40px; text-align: right; color: var(--text-muted, #999); user-select: none; padding-right: 8px !important; opacity: 0.6; }
+        .diff-gutter { width: 1px; min-width: 1px; background: var(--border-color, #e0e0e0); padding: 0 !important; }
+        .diff-line-equal td.diff-code { background: transparent; color: var(--text-primary, #1a1a2e); }
+        .diff-line-deleted td.diff-code { background: var(--diff-removed-bg, rgba(244, 67, 54, 0.12)); color: var(--diff-removed-text, #c62828); }
+        .diff-line-deleted td.diff-line-num { background: var(--diff-removed-bg, rgba(244, 67, 54, 0.12)); }
+        .diff-line-inserted td.diff-code { background: var(--diff-added-bg, rgba(76, 175, 80, 0.12)); color: var(--diff-added-text, #2e7d32); }
+        .diff-line-inserted td.diff-line-num { background: var(--diff-added-bg, rgba(76, 175, 80, 0.12)); }
+        .diff-line-deleted td.diff-code.diff-line-empty,
+        .diff-line-deleted td.diff-line-num.diff-line-empty,
+        .diff-line-inserted td.diff-code.diff-line-empty,
+        .diff-line-inserted td.diff-line-num.diff-line-empty { background: var(--bg-tertiary, #f9fafb); color: inherit; }
+        .diff-header { display: flex; gap: 4px; margin-top: 6px; margin-bottom: 2px; }
+        .diff-header-side { flex: 1; font-size: 0.78em; font-weight: 600; text-transform: uppercase; padding: 3px 8px; border-radius: 3px 3px 0 0; }
+        .diff-header-old { margin-left: 40px; background: var(--diff-removed-bg, rgba(244, 67, 54, 0.12)); color: var(--color-danger, #dc2626); }
+        .diff-header-new { margin-left: 41px; background: var(--diff-added-bg, rgba(76, 175, 80, 0.12)); color: var(--color-success, #16a34a); }
+
         .viewer-toolbar {
             display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 12px;
             padding: 8px 12px; background: var(--bg-secondary, #fff); border-radius: 6px;
@@ -513,18 +531,104 @@
             return name;
         }
 
-        // --- claude-trace inspired: inline diff ---
-        function renderInlineDiff(oldStr, newStr) {
-            var oldLines = (oldStr || '').split('\n');
-            var newLines = (newStr || '').split('\n');
-            var html = '<div class="diff-container">';
+        // --- LCS-based side-by-side diff (computation + rendering) ---
+
+        // Compute line-level diff using Longest Common Subsequence (LCS).
+        // O(m*n) time and space. Returns array of {type, oldLine?, newLine?, oldNum?, newNum?}
+        // where type is 'equal', 'insert', or 'delete' and line numbers are 1-indexed.
+        function computeLineDiff(oldLines, newLines) {
+            var m = oldLines.length, n = newLines.length;
+            var dp = [];
+            for (var i = 0; i <= m; i++) {
+                dp[i] = [];
+                for (var j = 0; j <= n; j++) {
+                    if (i === 0 || j === 0) dp[i][j] = 0;
+                    else if (oldLines[i - 1] === newLines[j - 1]) dp[i][j] = dp[i - 1][j - 1] + 1;
+                    else dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+                }
+            }
+            var ops = [];
+            var oi = m, ni = n;
+            while (oi > 0 || ni > 0) {
+                if (oi > 0 && ni > 0 && oldLines[oi - 1] === newLines[ni - 1]) {
+                    ops.push({ type: 'equal', oldLine: oldLines[oi - 1], newLine: newLines[ni - 1], oldNum: oi, newNum: ni });
+                    oi--; ni--;
+                } else if (ni > 0 && (oi === 0 || dp[oi][ni - 1] >= dp[oi - 1][ni])) {
+                    ops.push({ type: 'insert', newLine: newLines[ni - 1], newNum: ni });
+                    ni--;
+                } else {
+                    ops.push({ type: 'delete', oldLine: oldLines[oi - 1], oldNum: oi });
+                    oi--;
+                }
+            }
+            ops.reverse();
+            return ops;
+        }
+
+        // Simple fallback for large diffs where LCS would be too expensive
+        function renderSimpleDiff(oldLines, newLines) {
+            var html = '<div class="diff-header">' +
+                '<span class="diff-header-side diff-header-old">Old</span>' +
+                '<span class="diff-header-side diff-header-new">New</span></div>';
+            html += '<table class="diff-table"><colgroup>' +
+                '<col class="diff-line-num"><col><col class="diff-gutter"><col class="diff-line-num"><col>' +
+                '</colgroup><tbody>';
             for (var i = 0; i < oldLines.length; i++) {
-                html += '<div class="diff-line diff-removed">- ' + escapeHtml(oldLines[i]) + '</div>';
+                html += '<tr class="diff-line-deleted">' +
+                    '<td class="diff-line-num">' + (i + 1) + '</td><td class="diff-code">' + escapeHtml(oldLines[i]) + '</td>' +
+                    '<td class="diff-gutter"></td>' +
+                    '<td class="diff-line-num diff-line-empty"></td><td class="diff-code diff-line-empty"></td></tr>';
             }
             for (var j = 0; j < newLines.length; j++) {
-                html += '<div class="diff-line diff-added">+ ' + escapeHtml(newLines[j]) + '</div>';
+                html += '<tr class="diff-line-inserted">' +
+                    '<td class="diff-line-num diff-line-empty"></td><td class="diff-code diff-line-empty"></td>' +
+                    '<td class="diff-gutter"></td>' +
+                    '<td class="diff-line-num">' + (j + 1) + '</td><td class="diff-code">' + escapeHtml(newLines[j]) + '</td></tr>';
             }
-            html += '</div>';
+            html += '</tbody></table>';
+            return html;
+        }
+
+        function renderSideBySideDiff(oldStr, newStr) {
+            var oldLines = (oldStr || '').split('\n');
+            var newLines = (newStr || '').split('\n');
+
+            // Guard: fall back to simple diff for very large inputs to avoid O(n*m) freeze
+            var MAX_CELLS = 500000;
+            if (oldLines.length * newLines.length > MAX_CELLS) {
+                return renderSimpleDiff(oldLines, newLines);
+            }
+
+            var ops = computeLineDiff(oldLines, newLines);
+
+            var html = '<div class="diff-header">' +
+                '<span class="diff-header-side diff-header-old">Old</span>' +
+                '<span class="diff-header-side diff-header-new">New</span></div>';
+            html += '<table class="diff-table"><colgroup>' +
+                '<col class="diff-line-num"><col><col class="diff-gutter"><col class="diff-line-num"><col>' +
+                '</colgroup><tbody>';
+
+            for (var i = 0; i < ops.length; i++) {
+                var op = ops[i];
+                if (op.type === 'equal') {
+                    html += '<tr class="diff-line-equal">' +
+                        '<td class="diff-line-num">' + op.oldNum + '</td><td class="diff-code">' + escapeHtml(op.oldLine) + '</td>' +
+                        '<td class="diff-gutter"></td>' +
+                        '<td class="diff-line-num">' + op.newNum + '</td><td class="diff-code">' + escapeHtml(op.newLine) + '</td></tr>';
+                } else if (op.type === 'delete') {
+                    html += '<tr class="diff-line-deleted">' +
+                        '<td class="diff-line-num">' + op.oldNum + '</td><td class="diff-code">' + escapeHtml(op.oldLine) + '</td>' +
+                        '<td class="diff-gutter"></td>' +
+                        '<td class="diff-line-num diff-line-empty"></td><td class="diff-code diff-line-empty"></td></tr>';
+                } else if (op.type === 'insert') {
+                    html += '<tr class="diff-line-inserted">' +
+                        '<td class="diff-line-num diff-line-empty"></td><td class="diff-code diff-line-empty"></td>' +
+                        '<td class="diff-gutter"></td>' +
+                        '<td class="diff-line-num">' + op.newNum + '</td><td class="diff-code">' + escapeHtml(op.newLine) + '</td></tr>';
+                }
+            }
+
+            html += '</tbody></table>';
             return html;
         }
 
@@ -543,14 +647,14 @@
             } else if (name === 'edit') {
                 specialContent = '<div class="file-path-display">' + escapeHtml(input.file_path || '') + '</div>';
                 if (input.old_string != null && input.new_string != null) {
-                    specialContent += renderInlineDiff(input.old_string, input.new_string);
+                    specialContent += renderSideBySideDiff(input.old_string, input.new_string);
                 }
             } else if (name === 'multiedit') {
                 specialContent = '<div class="file-path-display">' + escapeHtml(input.file_path || '') + '</div>';
                 var edits = input.edits || [];
                 for (var i = 0; i < edits.length; i++) {
                     specialContent += '<div style="margin-top:8px;font-size:0.8em;color:var(--text-muted);font-weight:600;">Edit ' + (i + 1) + ':</div>';
-                    specialContent += renderInlineDiff(edits[i].old_string, edits[i].new_string);
+                    specialContent += renderSideBySideDiff(edits[i].old_string, edits[i].new_string);
                 }
             } else if (name === 'write') {
                 specialContent = '<div class="file-path-display">' + escapeHtml(input.file_path || '') + '</div>';
@@ -861,7 +965,12 @@
             }
             if (entry.data && typeof entry.data === 'object') {
                 if (entry.data.type) return '[' + entry.data.type + '] ' + (entry.data.command || entry.data.hookName || '');
-                return JSON.stringify(entry.data);
+                return JSON.stringify(entry.data, null, 2);
+            }
+            // Fallback: show raw message JSON for entries with an object message but no content property
+            if (entry.message && typeof entry.message === 'object') {
+                var raw = JSON.stringify(entry.message, null, 2);
+                return raw.length > 3000 ? raw.substring(0, 3000) + '\n... [truncated]' : raw;
             }
             return null;
         }
