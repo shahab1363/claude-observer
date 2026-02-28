@@ -347,8 +347,13 @@
             document.getElementById('liveIndicator').style.display = '';
 
             sseSource.onmessage = function(event) {
+                var entry;
                 try {
-                    var entry = JSON.parse(event.data);
+                    entry = JSON.parse(event.data);
+                } catch (parseErr) {
+                    return; // Ignore keepalive comments and malformed JSON
+                }
+                try {
                     currentEntries.push(entry);
 
                     // Index any tool_use blocks in this entry for result linking
@@ -371,8 +376,8 @@
                         updateEntryCount();
                         autoScrollToBottom();
                     }
-                } catch (e) {
-                    // Ignore parse errors (keepalive comments)
+                } catch (renderErr) {
+                    console.error('Failed to process transcript entry:', renderErr);
                 }
             };
 
@@ -647,14 +652,24 @@
             } else if (name === 'edit') {
                 specialContent = '<div class="file-path-display">' + escapeHtml(input.file_path || '') + '</div>';
                 if (input.old_string != null && input.new_string != null) {
-                    specialContent += renderSideBySideDiff(input.old_string, input.new_string);
+                    try {
+                        specialContent += renderSideBySideDiff(input.old_string, input.new_string);
+                    } catch (diffErr) {
+                        specialContent += '<div style="color:var(--color-danger,#dc2626);font-size:0.85em;padding:8px;background:rgba(239,68,68,0.08);border-radius:4px;">Failed to render diff: ' + escapeHtml(String(diffErr.message || diffErr)) + '</div>';
+                    }
                 }
             } else if (name === 'multiedit') {
                 specialContent = '<div class="file-path-display">' + escapeHtml(input.file_path || '') + '</div>';
                 var edits = input.edits || [];
                 for (var i = 0; i < edits.length; i++) {
+                    var edit = edits[i];
+                    if (!edit || typeof edit !== 'object') continue;
                     specialContent += '<div style="margin-top:8px;font-size:0.8em;color:var(--text-muted);font-weight:600;">Edit ' + (i + 1) + ':</div>';
-                    specialContent += renderSideBySideDiff(edits[i].old_string, edits[i].new_string);
+                    try {
+                        specialContent += renderSideBySideDiff(edit.old_string, edit.new_string);
+                    } catch (diffErr) {
+                        specialContent += '<div style="color:var(--color-danger,#dc2626);font-size:0.85em;padding:8px;background:rgba(239,68,68,0.08);border-radius:4px;">Failed to render diff: ' + escapeHtml(String(diffErr.message || diffErr)) + '</div>';
+                    }
                 }
             } else if (name === 'write') {
                 specialContent = '<div class="file-path-display">' + escapeHtml(input.file_path || '') + '</div>';
