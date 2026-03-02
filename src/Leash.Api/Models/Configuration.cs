@@ -43,7 +43,7 @@ public class CopilotConfig
 
 public class LlmConfig
 {
-    public string Provider { get; set; } = "anthropic-api";
+    public string Provider { get; set; } = "claude-persistent";
     public string Model { get; set; } = "opus";
     public int Timeout { get; set; } = 15000;
 

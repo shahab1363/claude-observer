@@ -28,7 +28,7 @@ public class ConfigurationTests
 
         // Assert
         Assert.NotNull(config);
-        Assert.Equal("anthropic-api", config.Llm.Provider);
+        Assert.Equal("claude-persistent", config.Llm.Provider);
         Assert.Equal("opus", config.Llm.Model); // JSON lowercase doesn't map without case-insensitive, so this tests the default
         Assert.Equal(15000, config.Llm.Timeout); // Default timeout (JSON lowercase doesn't map without case-insensitive)
         Assert.Equal(5050, config.Server.Port);

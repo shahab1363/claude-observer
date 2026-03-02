@@ -192,7 +192,7 @@ public class ConfigurationManager
         {
             Llm = new LlmConfig
             {
-                Provider = "anthropic-api",
+                Provider = "claude-persistent",
                 Model = "opus",
                 Timeout = 30000,
                 SystemPrompt = "You are a security analyzer that evaluates the safety of operations. Always respond ONLY with valid JSON containing safetyScore (0-100), reasoning (string), and category (safe|cautious|risky|dangerous). Never include any text outside the JSON object."

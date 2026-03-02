@@ -145,6 +145,19 @@ header h1 {
     gap: 10px;
 }
 
+.header-brand {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+}
+
+.motto {
+    font-size: 12px;
+    font-weight: 400;
+    color: var(--text-secondary);
+    letter-spacing: 0.3px;
+}
+
 .header-right {
     display: flex;
     align-items: center;

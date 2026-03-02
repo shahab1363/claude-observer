@@ -36,8 +36,8 @@ public class PendingDecision
 
 public class TrayConfig
 {
-    /// <summary>Master switch for the tray/notification feature. Default: disabled.</summary>
-    public bool Enabled { get; set; } = false;
+    /// <summary>Master switch for the tray/notification feature. Default: enabled.</summary>
+    public bool Enabled { get; set; } = true;
 
     /// <summary>Show passive alerts for denied events.</summary>
     public bool AlertOnDenied { get; set; } = true;
