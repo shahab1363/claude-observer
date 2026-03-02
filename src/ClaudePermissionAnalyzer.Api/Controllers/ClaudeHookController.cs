@@ -373,19 +373,19 @@ public class ClaudeHookController : ControllerBase
             {
                 _logger.LogInformation("Tray: user approved {Tool} (score={Score})", input.ToolName, output.SafetyScore);
                 output.AutoApprove = true;
-                await TryLogTrayDecisionAsync(input, output, "tray-approved", cancellationToken);
+                await TryLogTrayDecisionAsync(input, output, "tray-approved", CancellationToken.None);
                 return FormatClaudeResponse(hookEvent, output);
             }
             else if (decision == TrayDecision.Deny)
             {
                 _logger.LogInformation("Tray: user denied {Tool} (score={Score})", input.ToolName, output.SafetyScore);
                 output.AutoApprove = false;
-                await TryLogTrayDecisionAsync(input, output, "tray-denied", cancellationToken);
+                await TryLogTrayDecisionAsync(input, output, "tray-denied", CancellationToken.None);
                 return FormatClaudeResponse(hookEvent, output);
             }
 
             // null = timeout, fall through
-            await TryLogTrayDecisionAsync(input, output, "tray-timeout", cancellationToken);
+            await TryLogTrayDecisionAsync(input, output, "tray-timeout", CancellationToken.None);
             return null;
         }
         catch (Exception ex)
