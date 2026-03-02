@@ -49,7 +49,7 @@ Use `--no-hooks` to skip hook installation, or `--enforce` to start in enforceme
 
 ## Dashboard
 
-The web UI at `http://localhost:5050` has 7 pages:
+The web UI at `http://localhost:5050` has 8 pages:
 
 | Page | What it shows |
 |------|---------------|
@@ -60,6 +60,7 @@ The web UI at `http://localhost:5050` has 7 pages:
 | **Prompt Editor** | Edit the LLM prompt templates that drive safety analysis |
 | **Configuration** | Hook handler management: matchers, modes, thresholds, prompt templates |
 | **Claude Settings** | Direct JSON editor for `~/.claude/settings.json` |
+| **Copilot Settings** | Direct JSON editor for `~/.copilot/hooks/hooks.json` |
 
 ## Configuration
 

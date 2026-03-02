@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Claude Settings - Leash</title>
+    <title>Copilot Settings - Leash</title>
     <link rel="stylesheet" href="/css/styles.css">
     <style>
         .editor-toolbar {
@@ -133,16 +133,16 @@
             <a href="/transcripts.html">Transcripts</a>
             <a href="/prompts.html">Prompt Editor</a>
             <a href="/config.html">Configuration</a>
-            <a href="/claude-settings.html" class="active" aria-current="page">Claude Settings</a>
-            <a href="/copilot-settings.html">Copilot Settings</a>
+            <a href="/claude-settings.html">Claude Settings</a>
+            <a href="/copilot-settings.html" class="active" aria-current="page">Copilot Settings</a>
         </nav>
 
         <main id="main">
             <div class="card">
                 <div class="editor-toolbar">
                     <div>
-                        <h2 style="margin:0;">Claude Settings</h2>
-                        <div class="editor-path" id="settingsPath">~/.claude/settings.json</div>
+                        <h2 style="margin:0;">Copilot Settings</h2>
+                        <div class="editor-path" id="settingsPath">~/.copilot/hooks/hooks.json</div>
                     </div>
                     <div style="display:flex;gap:8px;align-items:center;">
                         <span class="editor-status" id="jsonStatus">Loading...</span>
@@ -340,7 +340,7 @@
             var status = document.getElementById('jsonStatus');
             var pathEl = document.getElementById('settingsPath');
             try {
-                var resp = await fetch('/api/claude-settings');
+                var resp = await fetch('/api/copilot-settings');
                 if (!resp.ok) throw new Error('Failed to load');
                 var data = await resp.json();
                 pathEl.textContent = data.path;
@@ -376,7 +376,7 @@
             }
             var editor = document.getElementById('settingsEditor');
             try {
-                var resp = await fetch('/api/claude-settings', {
+                var resp = await fetch('/api/copilot-settings', {
                     method: 'PUT',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ content: editor.value })
@@ -384,7 +384,7 @@
                 var data = await resp.json();
                 if (!resp.ok) throw new Error(data.error || 'Save failed');
                 originalContent = editor.value;
-                Toast.show('Saved', 'Claude settings saved successfully', 'success');
+                Toast.show('Saved', 'Copilot settings saved successfully', 'success');
             } catch (err) {
                 Toast.show('Save Error', err.message, 'danger');
             }

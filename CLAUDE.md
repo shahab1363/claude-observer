@@ -42,10 +42,11 @@ Leash/
 ├── src/Leash.Api/
 │   ├── Program.cs                          # Entry point: CLI args, DI, middleware, browser launch, hook install
 │   ├── GlobalUsings.cs                     # Shared using directives
-│   ├── Controllers/                        # 19 API controllers
+│   ├── Controllers/                        # 20 API controllers
 │   │   ├── ClaudeHookController.cs         # POST /api/hooks/claude?event={type} - main curl hook endpoint
 │   │   ├── HooksController.cs              # GET/POST /api/hooks/* - install/uninstall/enforce/status
 │   │   ├── ClaudeSettingsController.cs     # GET/PUT /api/claude-settings - view/edit ~/.claude/settings.json
+│   │   ├── CopilotSettingsController.cs    # GET/PUT /api/copilot-settings - view/edit ~/.copilot/hooks/hooks.json
 │   │   ├── CopilotHookController.cs        # POST /api/hooks/copilot - Copilot hook endpoint
 │   │   ├── DashboardController.cs          # GET /api/dashboard/* - stats, sessions, activity
 │   │   ├── ConfigController.cs             # GET/PUT /api/config - config CRUD
@@ -115,6 +116,7 @@ Leash/
 │       ├── transcripts.html                # Transcript browser with SSE
 │       ├── prompts.html                    # Prompt template editor
 │       ├── claude-settings.html            # JSON editor for ~/.claude/settings.json
+│       ├── copilot-settings.html           # JSON editor for ~/.copilot/hooks/hooks.json
 │       ├── css/styles.css                  # Full styling with dark mode, responsive
 │       └── js/
 │           ├── dashboard.js                # Dashboard logic, charts, profiles, quick actions
@@ -175,6 +177,8 @@ When hook handler config is saved via the Configuration page, hooks in `~/.claud
 | POST | `/api/hooks/uninstall` | Remove hooks from settings.json |
 | GET | `/api/claude-settings` | Read ~/.claude/settings.json |
 | PUT | `/api/claude-settings` | Write ~/.claude/settings.json (with JSON validation) |
+| GET | `/api/copilot-settings` | Read ~/.copilot/hooks/hooks.json |
+| PUT | `/api/copilot-settings` | Write ~/.copilot/hooks/hooks.json (with JSON validation) |
 | GET | `/api/logs?decision=&category=&hookType=&toolName=&sessionId=&limit=` | Filtered logs (supports comma-separated multi-values) |
 | DELETE | `/api/logs` | Clear all session log files |
 | GET | `/api/logs/export/{format}` | Export logs (csv/json) |
@@ -263,8 +267,8 @@ Config: `~/.leash/config.json` (auto-created)
 ## Known Issues and Technical Debt
 
 ### High Priority
-1. **No tests for new services** -- ClaudeHookController, HookInstaller, EnforcementService, ClaudeSettingsController, TrayController
-2. **CSP uses unsafe-inline** -- inline scripts in session.html, prompts.html, transcripts.html, claude-settings.html
+1. **No tests for new services** -- ClaudeHookController, HookInstaller, EnforcementService, ClaudeSettingsController, CopilotSettingsController, TrayController
+2. **CSP uses unsafe-inline** -- inline scripts in session.html, prompts.html, transcripts.html, claude-settings.html, copilot-settings.html
 
 ### Medium Priority
 3. **Cross-platform paths** -- `~/` expansion may not work perfectly on all OSes
