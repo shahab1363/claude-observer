@@ -254,6 +254,84 @@ function renderConfig(config) {
             </div>
         </div>
 
+        <div class="config-section">
+            <h3>System Tray &amp; Notifications</h3>
+            <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+                Native OS notifications for hook events. When enabled, shows alerts for denied/uncertain events and interactive approve/deny dialogs in approve-only mode.
+            </p>
+            <div class="config-field">
+                <label class="config-label" for="cfg-tray-enabled">
+                    Enabled
+                    <small>Master switch for tray icon and notifications</small>
+                </label>
+                <select id="cfg-tray-enabled" class="config-input"
+                    data-path="tray.enabled" data-type="bool" aria-label="Tray enabled">
+                    <option value="true" ${config.tray?.enabled ? 'selected' : ''}>Enabled</option>
+                    <option value="false" ${!config.tray?.enabled ? 'selected' : ''}>Disabled</option>
+                </select>
+            </div>
+            <div class="config-field">
+                <label class="config-label" for="cfg-tray-alertOnDenied">
+                    Alert on Denied
+                    <small>Show passive notification when events are denied</small>
+                </label>
+                <select id="cfg-tray-alertOnDenied" class="config-input"
+                    data-path="tray.alertOnDenied" data-type="bool" aria-label="Alert on denied">
+                    <option value="true" ${config.tray?.alertOnDenied !== false ? 'selected' : ''}>Yes</option>
+                    <option value="false" ${config.tray?.alertOnDenied === false ? 'selected' : ''}>No</option>
+                </select>
+            </div>
+            <div class="config-field">
+                <label class="config-label" for="cfg-tray-alertOnUncertain">
+                    Alert on Uncertain
+                    <small>Show passive notification for uncertain/passthrough events</small>
+                </label>
+                <select id="cfg-tray-alertOnUncertain" class="config-input"
+                    data-path="tray.alertOnUncertain" data-type="bool" aria-label="Alert on uncertain">
+                    <option value="true" ${config.tray?.alertOnUncertain !== false ? 'selected' : ''}>Yes</option>
+                    <option value="false" ${config.tray?.alertOnUncertain === false ? 'selected' : ''}>No</option>
+                </select>
+            </div>
+            <div class="config-field">
+                <label class="config-label" for="cfg-tray-interactiveEnabled">
+                    Interactive Dialogs
+                    <small>Show approve/deny popup for uncertain events (approve-only mode)</small>
+                </label>
+                <select id="cfg-tray-interactiveEnabled" class="config-input"
+                    data-path="tray.interactiveEnabled" data-type="bool" aria-label="Interactive enabled">
+                    <option value="true" ${config.tray?.interactiveEnabled !== false ? 'selected' : ''}>Enabled</option>
+                    <option value="false" ${config.tray?.interactiveEnabled === false ? 'selected' : ''}>Disabled</option>
+                </select>
+            </div>
+            <div class="config-field">
+                <label class="config-label" for="cfg-tray-interactiveTimeout">
+                    Interactive Timeout (seconds)
+                    <small>Max wait time for user response before falling through (max 25)</small>
+                </label>
+                <input id="cfg-tray-interactiveTimeout" class="config-input" type="number"
+                    value="${config.tray?.interactiveTimeoutSeconds || 25}" min="5" max="25"
+                    data-path="tray.interactiveTimeoutSeconds" aria-label="Interactive timeout">
+            </div>
+            <div class="config-field">
+                <label class="config-label" for="cfg-tray-scoreMin">
+                    Interactive Score Min
+                    <small>Minimum safety score to show interactive dialog</small>
+                </label>
+                <input id="cfg-tray-scoreMin" class="config-input" type="number"
+                    value="${config.tray?.interactiveScoreMin || 30}" min="0" max="100"
+                    data-path="tray.interactiveScoreMin" aria-label="Score min">
+            </div>
+            <div class="config-field">
+                <label class="config-label" for="cfg-tray-scoreMax">
+                    Interactive Score Max
+                    <small>Maximum safety score to show interactive dialog</small>
+                </label>
+                <input id="cfg-tray-scoreMax" class="config-input" type="number"
+                    value="${config.tray?.interactiveScoreMax || 85}" min="0" max="100"
+                    data-path="tray.interactiveScoreMax" aria-label="Score max">
+            </div>
+        </div>
+
         <div class="config-actions">
             <button class="btn" onclick="loadConfig()">Reset</button>
             <button class="btn btn-primary" id="saveConfigBtn" onclick="saveConfig()" disabled>Save Changes</button>
@@ -330,7 +408,9 @@ async function saveConfig() {
         }
 
         const key = parts[parts.length - 1];
-        if (input.type === 'number') {
+        if (input.dataset.type === 'bool') {
+            obj[key] = input.value === 'true';
+        } else if (input.type === 'number') {
             obj[key] = parseInt(input.value, 10);
         } else if (key === 'headers' && input.tagName === 'TEXTAREA') {
             // Parse JSON for headers field
