@@ -37,16 +37,16 @@ jobs:
       matrix:
         include:
           - rid: win-x64
-            artifact: claude-observer-win-x64
+            artifact: leash-win-x64
             os: windows-latest
           - rid: linux-x64
-            artifact: claude-observer-linux-x64
+            artifact: leash-linux-x64
             os: ubuntu-latest
           - rid: osx-x64
-            artifact: claude-observer-osx-x64
+            artifact: leash-osx-x64
             os: macos-latest
           - rid: osx-arm64
-            artifact: claude-observer-osx-arm64
+            artifact: leash-osx-arm64
             os: macos-latest
     runs-on: ${{ matrix.os }}
     steps:
@@ -60,7 +60,7 @@ jobs:
 
       - name: Publish ${{ matrix.rid }}
         run: |
-          dotnet publish src/ClaudePermissionAnalyzer.Api/ClaudePermissionAnalyzer.Api.csproj \
+          dotnet publish src/Leash.Api/Leash.Api.csproj \
             --configuration Release \
             --runtime ${{ matrix.rid }} \
             --self-contained true \

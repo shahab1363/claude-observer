@@ -1,17 +1,17 @@
-# Claude Observer
+# Leash
 
-A local service that monitors every tool call [Claude Code](https://docs.anthropic.com/en/docs/claude-code) makes, scores it for safety using an LLM, and gives you a real-time dashboard to see exactly what's happening. Optionally, it can auto-approve or deny requests based on the safety score.
+A local service that monitors every tool call [Claude Code](https://docs.anthropic.com/en/docs/claude-code) makes, scores it for safety using an LLM, and gives you a real-time dashboard to see exactly what's happening. Keep Claude on a leash. Optionally, it can auto-approve or deny requests based on the safety score.
 
 ## Why
 
 Claude Code asks for permission before running commands, reading files, or making edits. When you're deep in a task, clicking "allow" dozens of times breaks your flow. But blindly auto-approving everything is risky.
 
-Claude Observer sits in the middle: it intercepts every permission request, runs it through a safety analysis, and either logs it silently (observe mode) or makes the approve/deny decision for you (enforce mode). Either way, you get full visibility into what Claude is doing.
+Leash sits in the middle: it intercepts every permission request, runs it through a safety analysis, and either logs it silently (observe mode) or makes the approve/deny decision for you (enforce mode). Either way, you get full visibility into what Claude is doing.
 
 ## How It Works
 
 ```
-Claude Code  -->  curl hook  -->  Claude Observer  -->  LLM safety analysis  -->  decision
+Claude Code  -->  curl hook  -->  Leash  -->  LLM safety analysis  -->  decision
 ```
 
 Hooks are lightweight `curl` commands injected into `~/.claude/settings.json`. When Claude Code triggers a tool call, the hook sends the request to the local service. The service scores it 0-100, categorizes it (safe/cautious/risky/dangerous), and either:
@@ -25,10 +25,10 @@ Zero external dependencies beyond .NET and `curl`. No Python, no npm, no Docker.
 ## Quick Start
 
 ```bash
-git clone https://github.com/shahab1363/claude-observer.git
-cd claude-observer
+git clone https://github.com/shahab1363/leash.git
+cd leash
 dotnet build
-dotnet run --project src/ClaudePermissionAnalyzer.Api
+dotnet run --project src/Leash.Api
 ```
 
 That's it. On startup the service:
@@ -63,7 +63,7 @@ The web UI at `http://localhost:5050` has 7 pages:
 
 ## Configuration
 
-Config lives at `~/.claude-permission-analyzer/config.json` (auto-created on first run).
+Config lives at `~/.leash/config.json` (auto-created on first run).
 
 ```json
 {
@@ -105,14 +105,14 @@ Config lives at `~/.claude-permission-analyzer/config.json` (auto-created on fir
 ## CLI Flags
 
 ```bash
-dotnet run --project src/ClaudePermissionAnalyzer.Api             # Start with hooks, observe mode
-dotnet run --project src/ClaudePermissionAnalyzer.Api -- --enforce # Start with enforcement enabled
-dotnet run --project src/ClaudePermissionAnalyzer.Api -- --no-hooks # Start without installing hooks
+dotnet run --project src/Leash.Api             # Start with hooks, observe mode
+dotnet run --project src/Leash.Api -- --enforce # Start with enforcement enabled
+dotnet run --project src/Leash.Api -- --no-hooks # Start without installing hooks
 ```
 
 ## How Hooks Work
 
-The service writes `curl` commands into `~/.claude/settings.json` tagged with a `# claude-analyzer` marker:
+The service writes `curl` commands into `~/.claude/settings.json` tagged with a `# leash` marker:
 
 ```json
 {
@@ -121,14 +121,14 @@ The service writes `curl` commands into `~/.claude/settings.json` tagged with a 
       "matcher": "Bash",
       "hooks": [{
         "type": "command",
-        "command": "curl -sS -X POST \"http://localhost:5050/api/hooks/claude?event=PreToolUse\" -H \"Content-Type: application/json\" -d @- # claude-analyzer"
+        "command": "curl -sS -X POST \"http://localhost:5050/api/hooks/claude?event=PreToolUse\" -H \"Content-Type: application/json\" -d @- # leash"
       }]
     }]
   }
 }
 ```
 
-On shutdown, only hooks with the `# claude-analyzer` marker are removed. Your own hooks are never touched.
+On shutdown, only hooks with the `# leash` marker are removed. Your own hooks are never touched.
 
 ## Security
 
@@ -162,24 +162,24 @@ dotnet test     # Run 154 tests
 **Windows** (PowerShell or cmd):
 ```powershell
 dotnet build
-dotnet run --project src\ClaudePermissionAnalyzer.Api
+dotnet run --project src\Leash.Api
 ```
 Windows gets native system tray notifications via `NotifyIcon`. `curl` ships with Windows 10+.
 
 **macOS**:
 ```bash
 dotnet build
-dotnet run --project src/ClaudePermissionAnalyzer.Api
+dotnet run --project src/Leash.Api
 ```
 Uses `osascript` for notification dialogs. Requires [.NET 10 SDK for macOS](https://dotnet.microsoft.com/download) and `curl` (pre-installed).
 
 **Linux**:
 ```bash
 dotnet build
-dotnet run --project src/ClaudePermissionAnalyzer.Api
+dotnet run --project src/Leash.Api
 ```
 Uses `notify-send` (libnotify) for notifications and `zenity` for interactive dialogs. Install with `sudo apt install libnotify-bin zenity` (Debian/Ubuntu) or equivalent.
 
 ## Releases
 
-CI builds self-contained binaries for Windows x64, Linux x64, macOS x64, and macOS ARM64. See the [Releases](https://github.com/shahab1363/claude-observer/releases) page.
+CI builds self-contained binaries for Windows x64, Linux x64, macOS x64, and macOS ARM64. See the [Releases](https://github.com/shahab1363/leash/releases) page.

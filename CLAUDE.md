@@ -1,4 +1,4 @@
-# Claude Observer - Project Instructions
+# Leash - Project Instructions
 
 ## CRITICAL: Read Before Doing Anything
 
@@ -6,7 +6,7 @@
 
 ## Project Overview
 
-This is **Claude Observer** -- a C# ASP.NET Core (.NET 10) service that observes and optionally enforces Claude Code permission requests using LLM-based safety analysis. It has a web dashboard, curl-based hooks, and session tracking.
+This is **Leash** -- a C# ASP.NET Core (.NET 10) service that observes and optionally enforces Claude Code permission requests using LLM-based safety analysis. It has a web dashboard, curl-based hooks, and session tracking.
 
 **Core flow:** Claude Code -> `curl` hook command -> `POST /api/hooks/claude` -> C# ASP.NET Core service -> LLM CLI analysis -> approve/deny/passthrough -> Claude-formatted JSON response
 
@@ -17,9 +17,9 @@ This is **Claude Observer** -- a C# ASP.NET Core (.NET 10) service that observes
 ```bash
 dotnet build                                                           # Build
 dotnet test                                                            # Run tests
-dotnet run --project src/ClaudePermissionAnalyzer.Api                  # Run (auto-installs hooks)
-dotnet run --project src/ClaudePermissionAnalyzer.Api -- --enforce     # Run + enforce mode
-dotnet run --project src/ClaudePermissionAnalyzer.Api -- --no-hooks    # Run without hooks
+dotnet run --project src/Leash.Api                  # Run (auto-installs hooks)
+dotnet run --project src/Leash.Api -- --enforce     # Run + enforce mode
+dotnet run --project src/Leash.Api -- --no-hooks    # Run without hooks
 ```
 
 **On startup:** loads config -> installs hooks -> starts at `http://localhost:5050` -> opens browser -> on Ctrl+C removes hooks
@@ -38,8 +38,8 @@ dotnet run --project src/ClaudePermissionAnalyzer.Api -- --no-hooks    # Run wit
 ## Project Structure
 
 ```
-ClaudeObserver/
-├── src/ClaudePermissionAnalyzer.Api/
+Leash/
+├── src/Leash.Api/
 │   ├── Program.cs                          # Entry point: CLI args, DI, middleware, browser launch, hook install
 │   ├── GlobalUsings.cs                     # Shared using directives
 │   ├── Controllers/                        # 19 API controllers
@@ -122,10 +122,10 @@ ClaudeObserver/
 │           ├── config.js                   # Config page + hook handler management
 │           └── logs.js                     # Logs: chip filters, incremental updates, auto-refresh
 ├── prompts/                                # LLM prompt templates (9 files)
-├── tests/ClaudePermissionAnalyzer.Tests/   # xUnit tests
+├── tests/Leash.Tests/   # xUnit tests
 ├── .github/workflows/ci.yml               # CI/CD pipeline
 ├── HANDOFF.md                              # Local project state (gitignored)
-└── ClaudePermissionAnalyzer.sln
+└── Leash.sln
 ```
 
 ## Hook Architecture
@@ -138,7 +138,7 @@ HookInstaller writes to `~/.claude/settings.json`:
   "hooks": {
     "PermissionRequest": [{
       "matcher": "Bash",
-      "hooks": [{ "type": "command", "command": "curl -sS -X POST \"http://localhost:5050/api/hooks/claude?event=PermissionRequest\" -H \"Content-Type: application/json\" -d @- # claude-analyzer" }]
+      "hooks": [{ "type": "command", "command": "curl -sS -X POST \"http://localhost:5050/api/hooks/claude?event=PermissionRequest\" -H \"Content-Type: application/json\" -d @- # leash" }]
     }]
   }
 }
@@ -146,7 +146,7 @@ HookInstaller writes to `~/.claude/settings.json`:
 
 **Flow:** Claude Code -> stdin JSON -> `curl` -> service analyzes -> Claude-formatted JSON -> stdout -> Claude reads decision.
 
-The `# claude-analyzer` comment is a marker for clean uninstall (only removes our hooks, not user's).
+The `# leash` comment is a marker for clean uninstall (only removes our hooks, not user's).
 
 ### Passthrough Tools
 
@@ -219,7 +219,7 @@ When hook handler config is saved via the Configuration page, hooks in `~/.claud
 
 ## Configuration Reference
 
-Config: `~/.claude-permission-analyzer/config.json` (auto-created)
+Config: `~/.leash/config.json` (auto-created)
 
 ```json
 {
@@ -227,7 +227,7 @@ Config: `~/.claude-permission-analyzer/config.json` (auto-created)
   "server": { "port": 5050, "host": "localhost" },
   "security": { "apiKey": null, "rateLimitPerMinute": 600 },
   "profiles": { "activeProfile": "moderate" },
-  "session": { "maxHistoryPerSession": 50, "storageDir": "~/.claude-permission-analyzer/sessions" },
+  "session": { "maxHistoryPerSession": 50, "storageDir": "~/.leash/sessions" },
   "enforcementEnabled": false,
   "enforcementMode": "observe",
   "hookHandlers": {
@@ -245,12 +245,12 @@ Config: `~/.claude-permission-analyzer/config.json` (auto-created)
 - **Language:** C# with nullable reference types enabled, implicit usings
 - **Framework:** ASP.NET Core with Controllers (not Minimal APIs for endpoints)
 - **Frontend:** Vanilla HTML/CSS/JS only - NO external CDN dependencies
-- **Storage:** JSON files in `~/.claude-permission-analyzer/`
+- **Storage:** JSON files in `~/.leash/`
 - **Testing:** xUnit + Moq, tests mirror src structure
 - **Security:** All new endpoints must go through the middleware pipeline (SecurityHeaders -> RateLimiting -> ApiKeyAuth)
 - **Error handling:** Use `StorageException` and `ConfigurationException` custom types, not bare `Exception`
 - **Thread safety:** SessionManager uses per-session SemaphoreSlim locks - maintain this pattern
-- **Config:** Auto-created at `~/.claude-permission-analyzer/config.json` on first run
+- **Config:** Auto-created at `~/.leash/config.json` on first run
 
 ## Important Architectural Notes
 
