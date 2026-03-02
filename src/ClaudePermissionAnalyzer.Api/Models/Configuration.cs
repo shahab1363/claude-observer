@@ -27,6 +27,12 @@ public class Configuration
     public CopilotConfig Copilot { get; set; } = new();
 
     public TriggerConfig Triggers { get; set; } = new();
+
+    /// <summary>
+    /// System tray icon and native notification settings.
+    /// Disabled by default — enable in config or dashboard.
+    /// </summary>
+    public TrayConfig Tray { get; set; } = new();
 }
 
 public class CopilotConfig

@@ -2,6 +2,7 @@ using ClaudePermissionAnalyzer.Api.Controllers;
 using ClaudePermissionAnalyzer.Api.Handlers;
 using ClaudePermissionAnalyzer.Api.Models;
 using ClaudePermissionAnalyzer.Api.Services;
+using ClaudePermissionAnalyzer.Api.Services.Tray;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -85,6 +86,8 @@ public class ClaudeHookControllerTests : IDisposable
             _enforcementService,
             triggerService,
             new ConsoleStatusService(_enforcementService),
+            new NullNotificationService(),
+            new PendingDecisionService(NullLogger<PendingDecisionService>.Instance),
             _mockLogger.Object);
     }
 
@@ -125,6 +128,8 @@ public class ClaudeHookControllerTests : IDisposable
             enforcementSvc,
             triggerSvc,
             new ConsoleStatusService(enforcementSvc),
+            new NullNotificationService(),
+            new PendingDecisionService(NullLogger<PendingDecisionService>.Instance),
             _mockLogger.Object);
     }
 

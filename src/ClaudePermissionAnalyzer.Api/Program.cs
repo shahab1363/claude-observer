@@ -1,4 +1,5 @@
 using ClaudePermissionAnalyzer.Api.Services;
+using ClaudePermissionAnalyzer.Api.Services.Tray;
 using ClaudePermissionAnalyzer.Api.Models;
 using ClaudePermissionAnalyzer.Api.Middleware;
 using Microsoft.AspNetCore.ResponseCompression;
@@ -193,6 +194,57 @@ builder.Services.AddSingleton<ConsoleStatusService>();
 // Event trigger service for webhooks
 builder.Services.AddSingleton<TriggerService>();
 
+// ---- System tray & native notifications (disabled by default) ----
+builder.Services.AddSingleton<PendingDecisionService>();
+
+// Platform-detected factory for ITrayService
+builder.Services.AddSingleton<ITrayService>(sp =>
+{
+    var trayConfig = config.Tray;
+    if (!trayConfig.Enabled)
+        return new NullTrayService();
+
+#if WINDOWS
+    return new ClaudePermissionAnalyzer.Api.Services.Tray.Windows.WindowsTrayService(
+        sp.GetRequiredService<ILogger<ClaudePermissionAnalyzer.Api.Services.Tray.Windows.WindowsTrayService>>(),
+        appUrl);
+#else
+    if (OperatingSystem.IsMacOS())
+        return new ClaudePermissionAnalyzer.Api.Services.Tray.Mac.MacTrayService(
+            sp.GetRequiredService<ILogger<ClaudePermissionAnalyzer.Api.Services.Tray.Mac.MacTrayService>>());
+    if (OperatingSystem.IsLinux())
+        return new ClaudePermissionAnalyzer.Api.Services.Tray.Linux.LinuxTrayService(
+            sp.GetRequiredService<ILogger<ClaudePermissionAnalyzer.Api.Services.Tray.Linux.LinuxTrayService>>());
+    return new NullTrayService();
+#endif
+});
+
+// Platform-detected factory for INotificationService
+builder.Services.AddSingleton<INotificationService>(sp =>
+{
+    var trayConfig = config.Tray;
+    if (!trayConfig.Enabled)
+        return new NullNotificationService();
+
+#if WINDOWS
+    var winTray = sp.GetRequiredService<ITrayService>() as ClaudePermissionAnalyzer.Api.Services.Tray.Windows.WindowsTrayService;
+    if (winTray != null)
+        return new ClaudePermissionAnalyzer.Api.Services.Tray.Windows.WindowsNotificationService(
+            winTray,
+            sp.GetRequiredService<PendingDecisionService>(),
+            sp.GetRequiredService<ILogger<ClaudePermissionAnalyzer.Api.Services.Tray.Windows.WindowsNotificationService>>());
+    return new NullNotificationService();
+#else
+    if (OperatingSystem.IsMacOS())
+        return new ClaudePermissionAnalyzer.Api.Services.Tray.Mac.MacNotificationService(
+            sp.GetRequiredService<ILogger<ClaudePermissionAnalyzer.Api.Services.Tray.Mac.MacNotificationService>>());
+    if (OperatingSystem.IsLinux())
+        return new ClaudePermissionAnalyzer.Api.Services.Tray.Linux.LinuxNotificationService(
+            sp.GetRequiredService<ILogger<ClaudePermissionAnalyzer.Api.Services.Tray.Linux.LinuxNotificationService>>());
+    return new NullNotificationService();
+#endif
+});
+
 // Add OpenAPI/Swagger documentation
 builder.Services.AddOpenApi();
 
@@ -228,6 +280,17 @@ await profileService.InitializeAsync();
 // Initialize AdaptiveThresholdService
 var adaptiveService = app.Services.GetRequiredService<AdaptiveThresholdService>();
 await adaptiveService.LoadAsync();
+
+// Start tray service if enabled
+var trayService = app.Services.GetRequiredService<ITrayService>();
+if (config.Tray.Enabled)
+{
+    try { await trayService.StartAsync(); }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Warning: Tray service failed to start: {ex.Message}");
+    }
+}
 
 // ---- Hook installation ----
 var hookInstaller = app.Services.GetRequiredService<HookInstaller>();
@@ -296,6 +359,16 @@ lifetime.ApplicationStopping.Register(() =>
             var logger = app.Services.GetRequiredService<ILogger<Program>>();
             logger.LogError(ex, "Failed to uninstall Copilot hooks during shutdown");
         }
+    }
+
+    try
+    {
+        trayService.Dispose();
+    }
+    catch (Exception ex)
+    {
+        var logger = app.Services.GetRequiredService<ILogger<Program>>();
+        logger.LogError(ex, "Failed to dispose tray service during shutdown");
     }
 
     try
@@ -383,8 +456,9 @@ app.MapControllers();
 // Resolve mode label for banner
 var resolvedMode = !string.IsNullOrEmpty(config.EnforcementMode) ? config.EnforcementMode : (config.EnforcementEnabled ? "enforce" : "observe");
 var modeLabel = resolvedMode.ToUpperInvariant();
+var trayLabel = config.Tray.Enabled ? (trayService.IsAvailable ? "active" : "enabled (no tray)") : "disabled";
 Console.WriteLine($"  Claude Observer | {modeLabel} mode | {appUrl}");
-Console.WriteLine($"  Hooks: {(hooksInstalledThisSession ? "installed" : "skipped")} | Dashboard: {appUrl}");
+Console.WriteLine($"  Hooks: {(hooksInstalledThisSession ? "installed" : "skipped")} | Tray: {trayLabel} | Dashboard: {appUrl}");
 Console.WriteLine($"  Press Ctrl+C to stop (hooks will be auto-removed)");
 Console.WriteLine();
 

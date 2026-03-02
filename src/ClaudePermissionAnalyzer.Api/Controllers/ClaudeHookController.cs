@@ -1,6 +1,7 @@
 using ClaudePermissionAnalyzer.Api.Handlers;
 using ClaudePermissionAnalyzer.Api.Models;
 using ClaudePermissionAnalyzer.Api.Services;
+using ClaudePermissionAnalyzer.Api.Services.Tray;
 using ClaudePermissionAnalyzer.Api.Security;
 using Microsoft.AspNetCore.Mvc;
 using System.Text.Json;
@@ -23,6 +24,8 @@ public class ClaudeHookController : ControllerBase
     private readonly EnforcementService _enforcementService;
     private readonly TriggerService _triggerService;
     private readonly ConsoleStatusService _consoleStatus;
+    private readonly INotificationService _notificationService;
+    private readonly PendingDecisionService _pendingDecisionService;
     private readonly ILogger<ClaudeHookController> _logger;
 
     public ClaudeHookController(
@@ -34,6 +37,8 @@ public class ClaudeHookController : ControllerBase
         EnforcementService enforcementService,
         TriggerService triggerService,
         ConsoleStatusService consoleStatus,
+        INotificationService notificationService,
+        PendingDecisionService pendingDecisionService,
         ILogger<ClaudeHookController> logger)
     {
         _configManager = configManager;
@@ -44,6 +49,8 @@ public class ClaudeHookController : ControllerBase
         _enforcementService = enforcementService;
         _triggerService = triggerService;
         _consoleStatus = consoleStatus;
+        _notificationService = notificationService;
+        _pendingDecisionService = pendingDecisionService;
         _logger = logger;
     }
 
@@ -146,12 +153,16 @@ public class ClaudeHookController : ControllerBase
             await TryLogEventAsync(input, output, handler, cancellationToken);
 
             // Decision logic based on 3-state enforcement mode
+            var trayConfig = appConfig.Tray;
+
             switch (mode)
             {
                 case "observe":
                     // Log only, never return a decision
                     _logger.LogDebug("Observe mode - analyzed {Tool} (score={Score}) but not enforcing",
                         input.ToolName, output.SafetyScore);
+                    // Fire passive notification for denied/uncertain events
+                    ShowPassiveNotification(trayConfig, output, input);
                     return Content("{}", "application/json");
 
                 case "approve-only":
@@ -161,6 +172,12 @@ public class ClaudeHookController : ControllerBase
                         var approveResponse = FormatClaudeResponse(@event, output);
                         return Content(JsonSerializer.Serialize(approveResponse), "application/json");
                     }
+
+                    // Try interactive tray decision for uncertain scores
+                    var trayResult = await RequestTrayDecisionAsync(trayConfig, output, input, @event);
+                    if (trayResult != null)
+                        return Content(JsonSerializer.Serialize(trayResult), "application/json");
+
                     _logger.LogDebug("Approve-only mode - {Tool} not safe enough (score={Score}), falling through to user",
                         input.ToolName, output.SafetyScore);
                     return Content("{}", "application/json");
@@ -168,6 +185,9 @@ public class ClaudeHookController : ControllerBase
                 case "enforce":
                 default:
                     // Full enforcement: return approve or deny
+                    // Fire passive notification for denied events
+                    if (!output.AutoApprove)
+                        ShowPassiveNotification(trayConfig, output, input);
                     var enforceResponse = FormatClaudeResponse(@event, output);
                     return Content(JsonSerializer.Serialize(enforceResponse), "application/json");
             }
@@ -301,6 +321,116 @@ public class ClaudeHookController : ControllerBase
         }
         return new { };
     }
+
+    /// <summary>
+    /// Attempts an interactive tray decision for uncertain scores in approve-only mode.
+    /// Holds the HTTP request open while the user responds via tray popup or web dashboard.
+    /// Returns a Claude response object if the user decided, or null to fall through.
+    /// </summary>
+    private async Task<object?> RequestTrayDecisionAsync(TrayConfig trayConfig, HookOutput output, HookInput input, string hookEvent)
+    {
+        if (!trayConfig.Enabled || !trayConfig.InteractiveEnabled)
+            return null;
+
+        // Only show interactive dialog for scores in the uncertain range
+        if (output.SafetyScore < trayConfig.InteractiveScoreMin || output.SafetyScore > trayConfig.InteractiveScoreMax)
+            return null;
+
+        try
+        {
+            var info = BuildNotificationInfo(output, input, NotificationLevel.Warning);
+            var timeout = TimeSpan.FromSeconds(Math.Min(trayConfig.InteractiveTimeoutSeconds, 25));
+
+            // Create a pending decision that can also be resolved from the web dashboard
+            var (decisionId, pendingTask) = _pendingDecisionService.CreatePending(info, timeout);
+
+            // Show interactive notification (native dialog)
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    var nativeResult = await _notificationService.ShowInteractiveAsync(
+                        info with { DecisionId = decisionId }, timeout);
+                    if (nativeResult.HasValue)
+                        _pendingDecisionService.TryResolve(decisionId, nativeResult.Value);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogDebug(ex, "Native interactive notification failed");
+                }
+            });
+
+            // Wait for either native dialog or web dashboard to resolve
+            var decision = await pendingTask;
+
+            if (decision == TrayDecision.Approve)
+            {
+                _logger.LogInformation("Tray: user approved {Tool} (score={Score})", input.ToolName, output.SafetyScore);
+                output.AutoApprove = true;
+                return FormatClaudeResponse(hookEvent, output);
+            }
+            else if (decision == TrayDecision.Deny)
+            {
+                _logger.LogInformation("Tray: user denied {Tool} (score={Score})", input.ToolName, output.SafetyScore);
+                output.AutoApprove = false;
+                return FormatClaudeResponse(hookEvent, output);
+            }
+
+            // null = timeout, fall through
+            return null;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Tray interactive decision failed for {Tool}", input.ToolName);
+            return null;
+        }
+    }
+
+    /// <summary>Fires a passive (non-interactive) notification for denied/uncertain events.</summary>
+    private void ShowPassiveNotification(TrayConfig trayConfig, HookOutput output, HookInput input)
+    {
+        if (!trayConfig.Enabled) return;
+
+        var isDenied = !output.AutoApprove && output.SafetyScore < 30;
+        var isUncertain = !output.AutoApprove && output.SafetyScore >= 30;
+
+        if (isDenied && !trayConfig.AlertOnDenied) return;
+        if (isUncertain && !trayConfig.AlertOnUncertain) return;
+        if (output.AutoApprove) return;
+
+        var level = isDenied ? NotificationLevel.Danger : NotificationLevel.Warning;
+        var info = BuildNotificationInfo(output, input, level);
+
+        // Fire-and-forget (non-blocking)
+        _ = Task.Run(async () =>
+        {
+            try { await _notificationService.ShowAlertAsync(info); }
+            catch { /* non-fatal */ }
+        });
+    }
+
+    private static NotificationInfo BuildNotificationInfo(HookOutput output, HookInput input, NotificationLevel level)
+    {
+        var title = level == NotificationLevel.Danger
+            ? $"DENIED: {input.ToolName ?? "unknown"}"
+            : $"Review: {input.ToolName ?? "unknown"} (score {output.SafetyScore})";
+
+        var body = $"Score: {output.SafetyScore} | {output.Category ?? "unknown"}\n{Truncate(output.Reasoning, 200)}";
+
+        return new NotificationInfo
+        {
+            Title = title,
+            Body = body,
+            ToolName = input.ToolName,
+            SafetyScore = output.SafetyScore,
+            Reasoning = output.Reasoning,
+            Category = output.Category,
+            Level = level
+        };
+    }
+
+    private static string Truncate(string s, int maxLen)
+        => string.IsNullOrEmpty(s) ? "" : (s.Length <= maxLen ? s : s[..(maxLen - 3)] + "...");
 
     private async Task TryLogEventAsync(HookInput input, HookOutput? output, HandlerConfig? handler, CancellationToken ct)
     {
