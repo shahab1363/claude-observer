@@ -373,16 +373,19 @@ public class ClaudeHookController : ControllerBase
             {
                 _logger.LogInformation("Tray: user approved {Tool} (score={Score})", input.ToolName, output.SafetyScore);
                 output.AutoApprove = true;
+                await TryLogTrayDecisionAsync(input, output, "tray-approved", cancellationToken);
                 return FormatClaudeResponse(hookEvent, output);
             }
             else if (decision == TrayDecision.Deny)
             {
                 _logger.LogInformation("Tray: user denied {Tool} (score={Score})", input.ToolName, output.SafetyScore);
                 output.AutoApprove = false;
+                await TryLogTrayDecisionAsync(input, output, "tray-denied", cancellationToken);
                 return FormatClaudeResponse(hookEvent, output);
             }
 
             // null = timeout, fall through
+            await TryLogTrayDecisionAsync(input, output, "tray-timeout", cancellationToken);
             return null;
         }
         catch (Exception ex)
@@ -455,6 +458,31 @@ public class ClaudeHookController : ControllerBase
 
     private static string Truncate(string s, int maxLen)
         => string.IsNullOrEmpty(s) ? "" : (s.Length <= maxLen ? s : s[..(maxLen - 3)] + "...");
+
+    /// <summary>Logs a tray user action (approve/deny/timeout) as a session event.</summary>
+    private async Task TryLogTrayDecisionAsync(HookInput input, HookOutput output, string decision, CancellationToken ct)
+    {
+        try
+        {
+            var evt = new SessionEvent
+            {
+                Type = "TrayDecision",
+                ToolName = input.ToolName,
+                ToolInput = input.ToolInput,
+                Decision = decision,
+                SafetyScore = output.SafetyScore,
+                Reasoning = output.Reasoning,
+                Category = output.Category
+            };
+
+            await _sessionManager.RecordEventAsync(input.SessionId, evt, ct);
+            _consoleStatus.RecordEvent(decision, input.ToolName, output.SafetyScore, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Failed to log tray decision for session {SessionId}", input.SessionId);
+        }
+    }
 
     private async Task TryLogEventAsync(HookInput input, HookOutput? output, HandlerConfig? handler, CancellationToken ct)
     {

@@ -262,8 +262,11 @@ function getScoreClass(score) {
 
 function getDecisionClass(decision) {
     switch (decision) {
-        case 'auto-approved': return 'approved';
-        case 'denied': return 'denied';
+        case 'auto-approved':
+        case 'tray-approved': return 'approved';
+        case 'denied':
+        case 'tray-denied': return 'denied';
+        case 'tray-timeout': return 'logged';
         case 'logged':
         case 'no-handler': return 'logged';
         default: return 'logged';
@@ -274,6 +277,9 @@ function getDecisionLabel(decision) {
     switch (decision) {
         case 'auto-approved': return 'Approved';
         case 'denied': return 'Denied';
+        case 'tray-approved': return 'Tray Approved';
+        case 'tray-denied': return 'Tray Denied';
+        case 'tray-timeout': return 'Tray Timeout';
         case 'logged':
         case 'no-handler': return 'Logged';
         default: return decision || 'Unknown';

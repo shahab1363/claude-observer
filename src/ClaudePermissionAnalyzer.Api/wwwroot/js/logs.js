@@ -7,10 +7,10 @@ var lastLogCount = 0;
 
 /* ---------- Chip Filter Definitions & State ---------- */
 var chipDefinitions = {
-    hookType: ['PermissionRequest', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'UserPromptSubmit', 'Stop'],
+    hookType: ['PermissionRequest', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'UserPromptSubmit', 'Stop', 'TrayDecision'],
     toolName: ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'Task'],
     category: ['safe', 'cautious', 'risky', 'dangerous'],
-    decision: ['auto-approved', 'denied', 'logged']
+    decision: ['auto-approved', 'denied', 'logged', 'tray-approved', 'tray-denied', 'tray-timeout']
 };
 
 var activeChipFilters = {};
