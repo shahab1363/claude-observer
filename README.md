@@ -17,6 +17,7 @@ Claude Code  -->  curl hook  -->  Claude Observer  -->  LLM safety analysis  -->
 Hooks are lightweight `curl` commands injected into `~/.claude/settings.json`. When Claude Code triggers a tool call, the hook sends the request to the local service. The service scores it 0-100, categorizes it (safe/cautious/risky/dangerous), and either:
 
 - **Observe mode** (default): Logs everything, returns no opinion. Claude asks you as normal.
+- **Approve-only mode**: Auto-approves safe requests, falls through to you on anything uncertain. Never denies.
 - **Enforce mode**: Returns approve/deny based on the safety score vs threshold.
 
 Zero external dependencies beyond .NET and `curl`. No Python, no npm, no Docker.
@@ -35,7 +36,8 @@ That's it. On startup the service:
 1. Installs hooks into `~/.claude/settings.json` automatically
 2. Starts at **http://localhost:5050** and opens the dashboard
 3. Prints an in-place status line showing live event counts and latency
-4. On `Ctrl+C`, removes all installed hooks cleanly
+4. Optionally shows system tray notifications for uncertain decisions (enable with `tray.enabled` in config)
+5. On `Ctrl+C`, removes all installed hooks cleanly
 
 Use `--no-hooks` to skip hook installation, or `--enforce` to start in enforcement mode.
 
@@ -72,7 +74,7 @@ Config lives at `~/.claude-permission-analyzer/config.json` (auto-created on fir
     "persistentProcess": true
   },
   "server": { "port": 5050, "host": "localhost" },
-  "enforcementEnabled": false,
+  "enforcementMode": "observe",
   "hookHandlers": {
     "PermissionRequest": {
       "enabled": true,
@@ -85,7 +87,8 @@ Config lives at `~/.claude-permission-analyzer/config.json` (auto-created on fir
         "autoApprove": true
       }]
     }
-  }
+  },
+  "tray": { "enabled": false }
 }
 ```
 
@@ -93,10 +96,11 @@ Config lives at `~/.claude-permission-analyzer/config.json` (auto-created on fir
 
 | Setting | What it does |
 |---------|-------------|
-| `enforcementEnabled` | `false` = observe only, `true` = auto-approve/deny |
+| `enforcementMode` | `"observe"` (log only), `"approve-only"` (auto-approve safe, never deny), `"enforce"` (auto-approve/deny) |
 | `hookHandlers` | Which tools get analyzed, with what prompt, at what threshold |
 | `profiles.activeProfile` | `permissive` / `moderate` / `strict` / `lockdown` |
 | `llm.persistentProcess` | Keep a single Claude subprocess alive for faster responses |
+| `tray.enabled` | Show system tray notifications for uncertain decisions |
 
 ## CLI Flags
 
@@ -144,14 +148,37 @@ On shutdown, only hooks with the `# claude-analyzer` marker are removed. Your ow
 | Frontend | Vanilla HTML/CSS/JS (no CDN dependencies) |
 | LLM | Claude CLI subprocess |
 | Storage | JSON files + MemoryCache |
-| Tests | xUnit + Moq (143 tests) |
+| Tests | xUnit + Moq (154 tests) |
 
 ## Development
 
 ```bash
 dotnet build    # Build
-dotnet test     # Run 143 tests
+dotnet test     # Run 154 tests
 ```
+
+### Building & Running by OS
+
+**Windows** (PowerShell or cmd):
+```powershell
+dotnet build
+dotnet run --project src\ClaudePermissionAnalyzer.Api
+```
+Windows gets native system tray notifications via `NotifyIcon`. `curl` ships with Windows 10+.
+
+**macOS**:
+```bash
+dotnet build
+dotnet run --project src/ClaudePermissionAnalyzer.Api
+```
+Uses `osascript` for notification dialogs. Requires [.NET 10 SDK for macOS](https://dotnet.microsoft.com/download) and `curl` (pre-installed).
+
+**Linux**:
+```bash
+dotnet build
+dotnet run --project src/ClaudePermissionAnalyzer.Api
+```
+Uses `notify-send` (libnotify) for notifications and `zenity` for interactive dialogs. Install with `sudo apt install libnotify-bin zenity` (Debian/Ubuntu) or equivalent.
 
 ## Releases
 

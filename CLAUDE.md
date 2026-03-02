@@ -41,7 +41,8 @@ dotnet run --project src/ClaudePermissionAnalyzer.Api -- --no-hooks    # Run wit
 ClaudeObserver/
 ├── src/ClaudePermissionAnalyzer.Api/
 │   ├── Program.cs                          # Entry point: CLI args, DI, middleware, browser launch, hook install
-│   ├── Controllers/                        # 18 API controllers
+│   ├── GlobalUsings.cs                     # Shared using directives
+│   ├── Controllers/                        # 19 API controllers
 │   │   ├── ClaudeHookController.cs         # POST /api/hooks/claude?event={type} - main curl hook endpoint
 │   │   ├── HooksController.cs              # GET/POST /api/hooks/* - install/uninstall/enforce/status
 │   │   ├── ClaudeSettingsController.cs     # GET/PUT /api/claude-settings - view/edit ~/.claude/settings.json
@@ -55,6 +56,7 @@ ClaudeObserver/
 │   │   ├── PromptsController.cs            # GET/PUT /api/prompts/* - prompt templates
 │   │   ├── ClaudeLogsController.cs         # GET /api/claude-logs/* - transcript browsing + SSE stream
 │   │   ├── TerminalController.cs           # GET /api/terminal/stream - SSE terminal output
+│   │   ├── TrayController.cs               # GET/POST /api/tray/* - tray status, pending decisions, start
 │   │   ├── ProfileController.cs            # GET/POST /api/profile/* - permission profiles
 │   │   ├── AdaptiveThresholdController.cs  # GET/POST /api/adaptivethreshold/*
 │   │   ├── InsightsController.cs           # GET /api/insights
@@ -67,9 +69,9 @@ ClaudeObserver/
 │   │   ├── ContextInjectionHandler.cs      # Injects context (git, errors)
 │   │   └── CustomLogicHandler.cs           # Handles SessionStart/End events
 │   ├── Middleware/                          # 3 security middleware
-│   ├── Models/                             # 8 domain models
+│   ├── Models/                             # 9 domain models
 │   ├── Security/                           # Input sanitization
-│   ├── Services/                           # 23 business logic services
+│   ├── Services/                           # 25 root services + Tray/ subdirectory
 │   │   ├── SessionManager.cs               # Session CRUD + ClearAllSessionsAsync
 │   │   ├── ConfigurationManager.cs         # Config load/save
 │   │   ├── ClaudeCliClient.cs              # ILLMClient - one-shot claude subprocess
@@ -92,7 +94,18 @@ ClaudeObserver/
 │   │   ├── EnforcementService.cs           # Observe/enforce toggle, persisted to config
 │   │   ├── HookInstaller.cs               # Install/uninstall curl hooks in ~/.claude/settings.json
 │   │   ├── CopilotHookInstaller.cs        # Copilot hook installation
-│   │   └── ILLMClient.cs                   # Interface + LLMResponse model
+│   │   ├── TriggerService.cs               # Webhook triggers on hook events (fire-and-forget)
+│   │   ├── ConsoleStatusService.cs         # In-place console status line (event counts, latency)
+│   │   ├── ILLMClient.cs                   # Interface + LLMResponse model
+│   │   └── Tray/                           # System tray notification services
+│   │       ├── ITrayService.cs             # Tray service interface
+│   │       ├── INotificationService.cs     # Notification service interface
+│   │       ├── PendingDecisionService.cs   # Pending interactive decision queue
+│   │       ├── NullTrayService.cs          # No-op tray (when disabled/unavailable)
+│   │       ├── NullNotificationService.cs  # No-op notifications
+│   │       ├── Windows/                    # WindowsTrayService, WindowsNotificationService, TrayDecisionForm
+│   │       ├── Mac/                        # MacTrayService, MacNotificationService
+│   │       └── Linux/                      # LinuxTrayService, LinuxNotificationService
 │   ├── Exceptions/
 │   └── wwwroot/                            # Web UI (8 pages)
 │       ├── index.html                      # Dashboard
@@ -148,6 +161,7 @@ When hook handler config is saved via the Configuration page, hooks in `~/.claud
 | Mode | Behavior |
 |------|----------|
 | **Observe** (default) | Logs events with LLM analysis, returns `{}` -- Claude asks user as normal |
+| **Approve-Only** | Auto-approves safe requests, falls through to user on anything uncertain (never denies) |
 | **Enforce** | Returns approve/deny based on LLM safety scoring |
 
 ## API Endpoints
@@ -184,6 +198,10 @@ When hook handler config is saved via the Configuration page, hooks in `~/.claud
 | POST | `/api/quickactions/{action}` | Execute quick action |
 | GET | `/api/auditreport/{sessionId}` | JSON audit report |
 | GET | `/api/auditreport/{sessionId}/html` | HTML audit report |
+| GET | `/api/tray/status` | Tray service status + pending count |
+| POST | `/api/tray/start` | Start tray service without restart |
+| GET | `/api/tray/pending` | List pending interactive decisions |
+| POST | `/api/tray/decide/{id}` | Resolve a pending decision (approve/deny) |
 
 ## Security Architecture
 
@@ -211,11 +229,14 @@ Config: `~/.claude-permission-analyzer/config.json` (auto-created)
   "profiles": { "activeProfile": "moderate" },
   "session": { "maxHistoryPerSession": 50, "storageDir": "~/.claude-permission-analyzer/sessions" },
   "enforcementEnabled": false,
+  "enforcementMode": "observe",
   "hookHandlers": {
     "PermissionRequest": { "enabled": true, "handlers": [
       { "name": "bash-analyzer", "matcher": "Bash", "mode": "llm-analysis", "promptTemplate": "bash-prompt.txt", "threshold": 95, "autoApprove": true }
     ]}
-  }
+  },
+  "tray": { "enabled": false },
+  "triggers": { "enabled": false, "rules": [] }
 }
 ```
 
@@ -242,14 +263,14 @@ Config: `~/.claude-permission-analyzer/config.json` (auto-created)
 ## Known Issues and Technical Debt
 
 ### High Priority
-1. **No tests for new services** -- ClaudeHookController, HookInstaller, EnforcementService, ClaudeSettingsController
+1. **No tests for new services** -- ClaudeHookController, HookInstaller, EnforcementService, ClaudeSettingsController, TrayController
 2. **CSP uses unsafe-inline** -- inline scripts in session.html, prompts.html, transcripts.html, claude-settings.html
-3. **Duplicate ConfigController endpoints** -- overlapping `UpdateAsync` vs `UpdateConfigurationAsync`
 
 ### Medium Priority
-4. **Cross-platform paths** -- `~/` expansion may not work perfectly on all OSes
-5. **CSS file is ~2300 lines** -- could split into component files
-6. **ConfigurationManager registered twice** in Program.cs (bootstrap + DI)
+3. **Cross-platform paths** -- `~/` expansion may not work perfectly on all OSes
+4. **CSS file is ~3100 lines** -- could split into component files
+5. **ConfigurationManager registered twice** in Program.cs (bootstrap + DI)
+6. **Tray icon** -- Windows uses embedded resource; macOS/Linux use text-based fallback
 
 ### Low Priority
 7. **No API versioning**
