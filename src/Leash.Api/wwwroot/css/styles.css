@@ -1633,6 +1633,18 @@ nav a:focus-visible {
     white-space: nowrap;
 }
 
+.handler-client-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: 8px;
+    font-size: 10px;
+    font-weight: 500;
+    white-space: nowrap;
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    border: 1px solid var(--border-primary);
+}
+
 .handler-matcher {
     font-family: var(--font-mono);
     font-size: 11px;
@@ -2404,14 +2416,15 @@ kbd {
     color: var(--text-faint);
     border-bottom: 1px solid var(--border-color);
 }
-.log-columns-header span:nth-child(1) { width: 60px; flex-shrink: 0; }  /* Time */
-.log-columns-header span:nth-child(2) { width: 110px; flex-shrink: 0; } /* Type */
-.log-columns-header span:nth-child(3) { width: 70px; flex-shrink: 0; }  /* Tool */
-.log-columns-header span:nth-child(4) { flex: 1; }                      /* Details */
-.log-columns-header span:nth-child(5) { width: 70px; flex-shrink: 0; }  /* Decision */
-.log-columns-header span:nth-child(6) { width: 36px; flex-shrink: 0; }  /* Score */
-.log-columns-header span:nth-child(7) { width: 64px; flex-shrink: 0; }  /* Session */
-.log-columns-header span:nth-child(8) { width: 16px; flex-shrink: 0; }  /* Expand */
+.log-columns-header span:nth-child(1) { width: 80px; flex-shrink: 0; }  /* Time */
+.log-columns-header span:nth-child(2) { width: 35px; flex-shrink: 0; }  /* Client */
+.log-columns-header span:nth-child(3) { width: 100px; flex-shrink: 0; } /* Type */
+.log-columns-header span:nth-child(4) { width: 150px; flex-shrink: 0; }  /* Tool */
+.log-columns-header span:nth-child(5) { flex: 1; }                      /* Details */
+.log-columns-header span:nth-child(6) { width: 80px; flex-shrink: 0; }  /* Decision */
+.log-columns-header span:nth-child(7) { width: 36px; flex-shrink: 0; }  /* Score */
+.log-columns-header span:nth-child(8) { width: 70px; flex-shrink: 0; }  /* Session */
+.log-columns-header span:nth-child(9) { width: 16px; flex-shrink: 0; }  /* Expand */
 
 .log-entry-detailed {
     border: 1px solid var(--border-color, #e0e0e0);
@@ -2431,14 +2444,15 @@ kbd {
     transition: background 0.15s;
     white-space: nowrap;
 }
-.log-entry-detailed > .log-header .log-time { width: 60px; flex-shrink: 0; font-size: 0.9em; }
-.log-entry-detailed > .log-header .log-type-badge { width: 110px; flex-shrink: 0; text-align: center; font-size: 0.7em; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }
-.log-entry-detailed > .log-header .log-tool { width: 70px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.log-entry-detailed > .log-header .log-request-preview { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.log-entry-detailed > .log-header .log-decision { width: 70px; flex-shrink: 0; text-align: center; box-sizing: border-box; }
+.log-entry-detailed > .log-header .log-time { width: 80px; flex-shrink: 0; font-size: 0.9em; text-align: center; }
+.log-entry-detailed > .log-header .log-provider-badge { width: 35px; flex-shrink: 0; text-align: center; }
+.log-entry-detailed > .log-header .log-type-badge { width: 120px; flex-shrink: 0; text-align: center; font-size: 0.7em; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }
+.log-entry-detailed > .log-header .log-tool { width: 150px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.log-entry-detailed > .log-header .log-request-preview { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; }
+.log-entry-detailed > .log-header .log-decision { width: 100px; flex-shrink: 0; text-align: center; box-sizing: border-box; }
 .log-entry-detailed > .log-header .log-score { width: 36px; flex-shrink: 0; text-align: center; }
-.log-entry-detailed > .log-header .log-session { width: 64px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; margin-left: 0; }
-.log-entry-detailed > .log-header .log-expand { width: 16px; flex-shrink: 0; }
+.log-entry-detailed > .log-header .log-session { width: 70px; flex-shrink: 0; overflow: hidden; text-overflow: ellipsis; margin-left: 0; text-align: center; }
+.log-entry-detailed > .log-header .log-expand { width: 16px; flex-shrink: 0; text-align: center; }
 
 .log-header:hover {
     background: var(--bg-hover, #f5f5f5);
@@ -2453,6 +2467,23 @@ kbd {
     background: var(--bg-tertiary, #e5e7eb);
     color: var(--text-secondary, #555);
     white-space: nowrap;
+}
+
+.log-provider-badge {
+    font-size: 0.6em;
+    font-weight: 700;
+    width: 24px; height: 18px;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 9px;
+    flex-shrink: 0;
+}
+.provider-copilot {
+    background: #1f6feb;
+    color: #fff;
+}
+.provider-claude {
+    background: #d97706;
+    color: #fff;
 }
 
 .log-session {
