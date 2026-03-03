@@ -393,7 +393,7 @@ public class SessionManager : IDisposable
         // Wait for all background disposal tasks to complete
         try
         {
-            Task.WaitAll(_disposalTasks.ToArray(), TimeSpan.FromSeconds(5));
+            Task.WaitAll(_disposalTasks.ToArray(), TimeSpan.FromSeconds(1));
         }
         catch (AggregateException ex)
         {

@@ -21,6 +21,9 @@ var webArgs = args.Where(a =>
 
 var builder = WebApplication.CreateBuilder(webArgs);
 
+// Fast shutdown (default is 30s which feels sluggish)
+builder.Host.ConfigureHostOptions(opts => opts.ShutdownTimeout = TimeSpan.FromSeconds(5));
+
 // Add services
 builder.Services.AddControllers(options =>
 {
