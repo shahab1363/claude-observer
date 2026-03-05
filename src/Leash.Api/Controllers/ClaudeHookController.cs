@@ -203,11 +203,15 @@ public class ClaudeHookController : ControllerBase
         }
         catch (OperationCanceledException)
         {
+            // Still log the event so it appears in the dashboard
+            await TryLogEventAsync(input, null, null, CancellationToken.None);
             return Content("{}", "application/json");
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error processing Claude hook for {Event}", @event);
+            // Still log the event so it appears in the dashboard
+            await TryLogEventAsync(input, null, null, CancellationToken.None);
             // On error, return empty JSON so Claude falls through to normal behavior
             return Content("{}", "application/json");
         }

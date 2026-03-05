@@ -26,12 +26,12 @@ Zero external dependencies beyond .NET and `curl`. No Python, no npm, no Docker.
 
 **Windows (PowerShell):**
 ```powershell
-git clone https://github.com/awesomecorp/leash.git && cd leash && dotnet run --project src\Leash.Api
+git clone https://github.com/AwesomeCorp/leash-dotnet.git && cd leash-dotnet && dotnet run --project src\Leash.Api
 ```
 
 **macOS / Linux:**
 ```bash
-git clone https://github.com/awesomecorp/leash.git && cd leash && dotnet run --project src/Leash.Api
+git clone https://github.com/AwesomeCorp/leash-dotnet.git && cd leash-dotnet && dotnet run --project src/Leash.Api
 ```
 
 Requires [.NET 10 SDK](https://dotnet.microsoft.com/download) and `curl`. That's it.
@@ -190,4 +190,4 @@ Uses `notify-send` (libnotify) for notifications and `zenity` for interactive di
 
 ## Releases
 
-CI builds self-contained binaries for Windows x64, Linux x64, macOS x64, and macOS ARM64. See the [Releases](https://github.com/awesomecorp/leash/releases) page.
+CI builds self-contained binaries for Windows x64, Linux x64, macOS x64, and macOS ARM64. See the [Releases](https://github.com/AwesomeCorp/leash-dotnet/releases) page.
